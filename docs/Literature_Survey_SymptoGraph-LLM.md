@@ -74,62 +74,62 @@ Taken together, the literature establishes the components required for trustwort
 
 ## References
 
-[1] Xu, X., Yao, B., Dong, Y., Gabriel, S., Yu, H., Hendler, J., Ghassemi, M., Dey, A.K. and Wang, D., 2024. Mental-LLM: Leveraging large language models for mental health prediction via online text data. Proceedings of the ACM on Interactive, Mobile, Wearable and Ubiquitous Technologies, 8(1), pp.1-32. https://doi.org/10.1145/3643540
+[1] Xu, X., Yao, B., Dong, Y., Gabriel, S., Yu, H., Hendler, J., Ghassemi, M., Dey, A.K. and Wang, D. (2024) ‘Mental-LLM: Leveraging large language models for mental health prediction via online text data’, *Proceedings of the ACM on Interactive, Mobile, Wearable and Ubiquitous Technologies*, 8(1), pp. 1–32. Available at: https://doi.org/10.1145/3643540.
 
-[2] Shah, S.M., Gillani, S.A., Baig, M.S.A., Saleem, M.A. and Siddiqui, M.H., 2025. Advancing depression detection on social media platforms through fine-tuned large language models. Online Social Networks and Media, 46, p.100311. https://doi.org/10.1016/j.osnem.2025.100311
+[2] Shah, S.M., Gillani, S.A., Baig, M.S.A., Saleem, M.A. and Siddiqui, M.H. (2025) ‘Advancing depression detection on social media platforms through fine-tuned large language models’, *Online Social Networks and Media*, 46, 100311. Available at: https://doi.org/10.1016/j.osnem.2025.100311.
 
-[3] Liu, J., Ding, P. and Chen, J., 2025. DepGLM: Depression degree recognition on social media based on large language models. Digital Health, 11, p.20552076251408281. https://doi.org/10.1177/20552076251408281
+[3] Liu, J., Ding, P. and Chen, J. (2025) ‘DepGLM: Depression degree recognition on social media based on large language models’, *Digital Health*, 11, 20552076251408281. Available at: https://doi.org/10.1177/20552076251408281.
 
-[4] Abdullah, M. and Negied, N., 2024. Detection and Prediction of Future Mental Disorder From Social Media Data Using Machine Learning, Ensemble Learning, and Large Language Models. IEEE Access, 12, pp.120553-120569. https://doi.org/10.1109/access.2024.3406469
+[4] Abdullah, M. and Negied, N. (2024) ‘Detection and Prediction of Future Mental Disorder From Social Media Data Using Machine Learning, Ensemble Learning, and Large Language Models’, *IEEE Access*, 12, pp. 120553–120569. Available at: https://doi.org/10.1109/access.2024.3406469.
 
-[5] Qorich, M. and El Ouazzani, R., 2024. Advanced deep learning and large language models for suicide ideation detection on social media. Progress in Artificial Intelligence, 13(2), pp.135-147. https://doi.org/10.1007/s13748-024-00326-z
+[5] Qorich, M. and El Ouazzani, R. (2024) ‘Advanced deep learning and large language models for suicide ideation detection on social media’, *Progress in Artificial Intelligence*, 13(2), pp. 135–147. Available at: https://doi.org/10.1007/s13748-024-00326-z.
 
-[6] Bauer, B., Norel, R., Leow, A., Rached, Z.A., Wen, B. and Cecchi, G., 2024. Using Large Language Models to Understand Suicidality in a Social Media–Based Taxonomy of Mental Health Disorders: Linguistic Analysis of Reddit Posts. JMIR Mental Health, 11, p.e57234. https://doi.org/10.2196/57234
+[6] Bauer, B., Norel, R., Leow, A., Rached, Z.A., Wen, B. and Cecchi, G. (2024) ‘Using Large Language Models to Understand Suicidality in a Social Media–Based Taxonomy of Mental Health Disorders: Linguistic Analysis of Reddit Posts’, *JMIR Mental Health*, 11, e57234. Available at: https://doi.org/10.2196/57234.
 
-[7] Lee, C., Mohebbi, M., O'Callaghan, E. and Winsberg, M., 2024. Large Language Models Versus Expert Clinicians in Crisis Prediction Among Telemental Health Patients: Comparative Study. JMIR Mental Health, 11, p.e58129. https://doi.org/10.2196/58129
+[7] Lee, C., Mohebbi, M., O'Callaghan, E. and Winsberg, M. (2024) ‘Large Language Models Versus Expert Clinicians in Crisis Prediction Among Telemental Health Patients: Comparative Study’, *JMIR Mental Health*, 11, e58129. Available at: https://doi.org/10.2196/58129.
 
-[8] McCoy, T.H. and Perlis, R.H., 2025. Applying large language models to stratify suicide risk using narrative clinical notes. Journal of Mood & Anxiety Disorders, 10, p.100109. https://doi.org/10.1016/j.xjmad.2025.100109
+[8] McCoy, T.H. and Perlis, R.H. (2025) ‘Applying large language models to stratify suicide risk using narrative clinical notes’, *Journal of Mood & Anxiety Disorders*, 10, 100109. Available at: https://doi.org/10.1016/j.xjmad.2025.100109.
 
-[9] Xie, W., Song, X., Lu, Z., Fei, G., Zhou, Y., Ding, S., Zuo, F., Wu, B., Gu, T., Xu, L., De, X. and Zhu, B., 2026. Retrieval‑augmented large language models for depression screening and suicide risk stratification. BMC Psychiatry, 26(1), p.386. https://doi.org/10.1186/s12888-026-07988-0
+[9] Xie, W., Song, X., Lu, Z., Fei, G., Zhou, Y., Ding, S., Zuo, F., Wu, B., Gu, T., Xu, L., De, X. and Zhu, B. (2026) ‘Retrieval‑augmented large language models for depression screening and suicide risk stratification’, *BMC Psychiatry*, 26(1), 386. Available at: https://doi.org/10.1186/s12888-026-07988-0.
 
-[10] Bao, E., Pérez, A. and Parapar, J., 2024. Explainable depression symptom detection in social media. Health Information Science and Systems, 12(1), p.47. https://doi.org/10.1007/s13755-024-00303-9
+[10] Bao, E., Pérez, A. and Parapar, J. (2024) ‘Explainable depression symptom detection in social media’, *Health Information Science and Systems*, 12(1), 47. Available at: https://doi.org/10.1007/s13755-024-00303-9.
 
-[11] Suksam, J., Kaewbuadee, P. and Jareanpon, C., 2026. Transformer-Based Ensemble Learning for Symptom-Level Classification and DSM-5-Oriented Depression Screening on Social Media. Information, 17(6), p.546. https://doi.org/10.3390/info17060546
+[11] Suksam, J., Kaewbuadee, P. and Jareanpon, C. (2026) ‘Transformer-Based Ensemble Learning for Symptom-Level Classification and DSM-5-Oriented Depression Screening on Social Media’, *Information*, 17(6), 546. Available at: https://doi.org/10.3390/info17060546.
 
-[12] Garg, M., 2024. WellXplain: Wellness concept extraction and classification in Reddit posts for mental health analysis. Knowledge-Based Systems, 284, p.111228. https://doi.org/10.1016/j.knosys.2023.111228
+[12] Garg, M. (2024) ‘WellXplain: Wellness concept extraction and classification in Reddit posts for mental health analysis’, *Knowledge-Based Systems*, 284, 111228. Available at: https://doi.org/10.1016/j.knosys.2023.111228.
 
-[13] Zhang, W., Xie, J., Zhang, Z. and Liu, X., 2024. Depression Detection Using Digital Traces on Social Media: A Knowledge-aware Deep Learning Approach. Journal of Management Information Systems, 41(2), pp.546-580. https://doi.org/10.1080/07421222.2024.2340822
+[13] Zhang, W., Xie, J., Zhang, Z. and Liu, X. (2024) ‘Depression Detection Using Digital Traces on Social Media: A Knowledge-aware Deep Learning Approach’, *Journal of Management Information Systems*, 41(2), pp. 546–580. Available at: https://doi.org/10.1080/07421222.2024.2340822.
 
-[14] Qasim, A., Mehak, G., Hussain, N., Gelbukh, A. and Sidorov, G., 2025. Detection of Depression Severity in Social Media Text Using Transformer-Based Models. Information, 16(2), p.114. https://doi.org/10.3390/info16020114
+[14] Qasim, A., Mehak, G., Hussain, N., Gelbukh, A. and Sidorov, G. (2025) ‘Detection of Depression Severity in Social Media Text Using Transformer-Based Models’, *Information*, 16(2), 114. Available at: https://doi.org/10.3390/info16020114.
 
-[15] Kerasiotis, M., Ilias, L. and Askounis, D., 2024. Depression detection in social media posts using transformer-based models and auxiliary features. Social Network Analysis and Mining, 14(1), p.196. https://doi.org/10.1007/s13278-024-01360-4
+[15] Kerasiotis, M., Ilias, L. and Askounis, D. (2024) ‘Depression detection in social media posts using transformer-based models and auxiliary features’, *Social Network Analysis and Mining*, 14(1), 196. Available at: https://doi.org/10.1007/s13278-024-01360-4.
 
-[16] Chen, C., Li, F., Chen, H. and Lin, Y., 2025. Heterogeneous subgraph network with prompt learning for interpretable depression detection on social media. Knowledge-Based Systems, 315, p.113215. https://doi.org/10.1016/j.knosys.2025.113215
+[16] Chen, C., Li, F., Chen, H. and Lin, Y. (2025) ‘Heterogeneous subgraph network with prompt learning for interpretable depression detection on social media’, *Knowledge-Based Systems*, 315, 113215. Available at: https://doi.org/10.1016/j.knosys.2025.113215.
 
-[17] Jain, M., Jain, S., Jain, A. and Garg, B., 2024. CDME-GAT: Context-Aware Depression Detection Using Multiembedding and Graph Attention Networks in Social Media Text. IEEE Transactions on Computational Social Systems, 11(6), pp.7212-7222. https://doi.org/10.1109/tcss.2024.3402689
+[17] Jain, M., Jain, S., Jain, A. and Garg, B. (2024) ‘CDME-GAT: Context-Aware Depression Detection Using Multiembedding and Graph Attention Networks in Social Media Text’, *IEEE Transactions on Computational Social Systems*, 11(6), pp. 7212–7222. Available at: https://doi.org/10.1109/tcss.2024.3402689.
 
-[18] Rehman, A.U., Iqbal, A., Sayyed, A., Aslam, Z., Mohmand, M.I. and Husnain, G., 2026. Explainable Text-Based Depression and Suicide Risk Prediction from Social Media Using Deep Learning and Graph Neural Networks. Healthcare, 14(11), p.1440. https://doi.org/10.3390/healthcare14111440
+[18] Rehman, A.U., Iqbal, A., Sayyed, A., Aslam, Z., Mohmand, M.I. and Husnain, G. (2026) ‘Explainable Text-Based Depression and Suicide Risk Prediction from Social Media Using Deep Learning and Graph Neural Networks’, *Healthcare*, 14(11), 1440. Available at: https://doi.org/10.3390/healthcare14111440.
 
-[19] Tahir, A., Mustafa, G., Afzal, M.T. and Rafiq, H., 2026. An ontology-guided knowledge graph and retrieval-augmented LLM framework for interpretable mental health assessment. Social Network Analysis and Mining. https://doi.org/10.1007/s13278-026-01625-0
+[19] Tahir, A., Mustafa, G., Afzal, M.T. and Rafiq, H. (2026) ‘An ontology-guided knowledge graph and retrieval-augmented LLM framework for interpretable mental health assessment’, *Social Network Analysis and Mining*. Available at: https://doi.org/10.1007/s13278-026-01625-0.
 
-[20] Gao, S., Yu, K., Yang, Y., Yu, S., Shi, C., Wang, X., Tang, N. and Zhu, H., 2025. Large language model powered knowledge graph construction for mental health exploration. Nature Communications, 16(1), p.7526. https://doi.org/10.1038/s41467-025-62781-z
+[20] Gao, S., Yu, K., Yang, Y., Yu, S., Shi, C., Wang, X., Tang, N. and Zhu, H. (2025) ‘Large language model powered knowledge graph construction for mental health exploration’, *Nature Communications*, 16(1), 7526. Available at: https://doi.org/10.1038/s41467-025-62781-z.
 
-[21] Hsieh, C.Y., Ye, Q.Y., Liu, F.C., Wang, X., Lee, C.H. and Lin, C.S., 2025. Multi-label mental health classification in social media posts with multi-perspective prompt ensemble and auxiliary self-supervision. Scientific Reports, 16(1), p.1153. https://doi.org/10.1038/s41598-025-30873-x
+[21] Hsieh, C.Y., Ye, Q.Y., Liu, F.C., Wang, X., Lee, C.H. and Lin, C.S. (2025) ‘Multi-label mental health classification in social media posts with multi-perspective prompt ensemble and auxiliary self-supervision’, *Scientific Reports*, 16(1), 1153. Available at: https://doi.org/10.1038/s41598-025-30873-x.
 
-[22] Khowaja, S.A., Nkenyereye, L., Khuwaja, P., Al Hamadi, H. and Dev, K., 2025. Depression Detection From Social Media Posts Using Emotion Aware Encoders and Fuzzy Based Contrastive Networks. IEEE Transactions on Fuzzy Systems, 33(1), pp.43-53. https://doi.org/10.1109/tfuzz.2024.3461776
+[22] Khowaja, S.A., Nkenyereye, L., Khuwaja, P., Al Hamadi, H. and Dev, K. (2025) ‘Depression Detection From Social Media Posts Using Emotion Aware Encoders and Fuzzy Based Contrastive Networks’, *IEEE Transactions on Fuzzy Systems*, 33(1), pp. 43–53. Available at: https://doi.org/10.1109/tfuzz.2024.3461776.
 
-[23] Hsu, E. and Roberts, K., 2025. Leveraging large language models for knowledge-free weak supervision in clinical natural language processing. Scientific Reports, 15(1), p.8241. https://doi.org/10.1038/s41598-024-68168-2
+[23] Hsu, E. and Roberts, K. (2025) ‘Leveraging large language models for knowledge-free weak supervision in clinical natural language processing’, *Scientific Reports*, 15(1), 8241. Available at: https://doi.org/10.1038/s41598-024-68168-2.
 
-[24] Khalil, S.S., Tawfik, N.S. and Spruit, M., 2024. Federated learning for privacy-preserving depression detection with multilingual language models in social media posts. Patterns, 5(7), p.100990. https://doi.org/10.1016/j.patter.2024.100990
+[24] Khalil, S.S., Tawfik, N.S. and Spruit, M. (2024) ‘Federated learning for privacy-preserving depression detection with multilingual language models in social media posts’, *Patterns*, 5(7), 100990. Available at: https://doi.org/10.1016/j.patter.2024.100990.
 
-[25] Guo, Z., Lai, A., Thygesen, J.H., Farrington, J., Keen, T. and Li, K., 2024. Large Language Models for Mental Health Applications: Systematic Review. JMIR Mental Health, 11, p.e57400. https://doi.org/10.2196/57400
+[25] Guo, Z., Lai, A., Thygesen, J.H., Farrington, J., Keen, T. and Li, K. (2024) ‘Large Language Models for Mental Health Applications: Systematic Review’, *JMIR Mental Health*, 11, e57400. Available at: https://doi.org/10.2196/57400.
 
-[26] Omar, M., Soffer, S., Charney, A.W., Landi, I., Nadkarni, G.N. and Klang, E., 2024. Applications of large language models in psychiatry: a systematic review. Frontiers in Psychiatry, 15, p.1422807. https://doi.org/10.3389/fpsyt.2024.1422807
+[26] Omar, M., Soffer, S., Charney, A.W., Landi, I., Nadkarni, G.N. and Klang, E. (2024) ‘Applications of large language models in psychiatry: a systematic review’, *Frontiers in Psychiatry*, 15, 1422807. Available at: https://doi.org/10.3389/fpsyt.2024.1422807.
 
-[27] Volkmer, S., Meyer-Lindenberg, A. and Schwarz, E., 2024. Large language models in psychiatry: Opportunities and challenges. Psychiatry Research, 339, p.116026. https://doi.org/10.1016/j.psychres.2024.116026
+[27] Volkmer, S., Meyer-Lindenberg, A. and Schwarz, E. (2024) ‘Large language models in psychiatry: Opportunities and challenges’, *Psychiatry Research*, 339, 116026. Available at: https://doi.org/10.1016/j.psychres.2024.116026.
 
-[28] Levkovich, I. and Omar, M., 2024. Evaluating of BERT-based and Large Language Mod for Suicide Detection, Prevention, and Risk Assessment: A Systematic Review. Journal of Medical Systems, 48(1), p.113. https://doi.org/10.1007/s10916-024-02134-3
+[28] Levkovich, I. and Omar, M. (2024) ‘Evaluating of BERT-based and Large Language Mod for Suicide Detection, Prevention, and Risk Assessment: A Systematic Review’, *Journal of Medical Systems*, 48(1), 113. Available at: https://doi.org/10.1007/s10916-024-02134-3.
 
-[29] Jin, H., Chen, S., Dilixiati, D., Jiang, Y., Zhu, K.Q. and Wu, M., 2026. PsyEval: a comprehensive large language model evaluation benchmark for mental health. npj Mental Health Research. https://doi.org/10.1038/s44184-026-00227-0
+[29] Jin, H., Chen, S., Dilixiati, D., Jiang, Y., Zhu, K.Q. and Wu, M. (2026) ‘PsyEval: a comprehensive large language model evaluation benchmark for mental health’, *npj Mental Health Research*. Available at: https://doi.org/10.1038/s44184-026-00227-0.
 
-[30] Bucher, A., Egger, S., Vashkite, I., Wu, W. and Schwabe, G., 2025. “It’s Not Only Attention We Need”: Systematic Review of Large Language Models in Mental Health Care. JMIR Mental Health, 12, p.e78410. https://doi.org/10.2196/78410
+[30] Bucher, A., Egger, S., Vashkite, I., Wu, W. and Schwabe, G. (2025) ‘“It’s Not Only Attention We Need”: Systematic Review of Large Language Models in Mental Health Care’, *JMIR Mental Health*, 12, e78410. Available at: https://doi.org/10.2196/78410.
