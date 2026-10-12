@@ -80,7 +80,7 @@ No open dataset labels GAD-7 symptoms, so build a small one:
 ## 8. Download commands
 
 **Into Google Drive (Colab):** open
-[`notebooks/download_data_to_drive.ipynb`](https://colab.research.google.com/github/sid-2k6/SymptoGraph-LLM/blob/main/notebooks/download_data_to_drive.ipynb)
+[`notebooks/01_download_data_to_drive.ipynb`](https://colab.research.google.com/github/sid-2k6/SymptoGraph-LLM/blob/main/notebooks/01_download_data_to_drive.ipynb)
 in Colab. It downloads on Colab's network and writes the result to your Drive,
 so nothing transfers through your own machine.
 
