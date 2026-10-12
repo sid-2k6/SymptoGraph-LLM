@@ -1,5 +1,7 @@
 # Raw datasets: re-create with `bash scripts/download_data.sh`
 data/*
+processed/*
+!processed/.gitkeep
 !data/README.md
 __pycache__/
 *.pyc

@@ -1,0 +1,83 @@
+{
+  "description": "Unified symptom ontology for SymptoGraph-LLM. Harmonises PHQ-9, GAD-7 and additional clinically grounded concepts available in the open datasets. Used as the concept bottleneck label space (novelty N1).",
+  "symptoms": [
+    {"name": "anhedonia",                 "instrument": "PHQ-9", "item": 1, "definition": "Little interest or pleasure in doing things"},
+    {"name": "depressed_mood",            "instrument": "PHQ-9", "item": 2, "definition": "Feeling down, depressed or sad"},
+    {"name": "sleep_disturbance",         "instrument": "PHQ-9", "item": 3, "definition": "Trouble falling or staying asleep, or sleeping too much"},
+    {"name": "fatigue",                   "instrument": "PHQ-9", "item": 4, "definition": "Feeling tired or having little energy"},
+    {"name": "appetite_change",           "instrument": "PHQ-9", "item": 5, "definition": "Poor appetite or overeating"},
+    {"name": "worthlessness_guilt",       "instrument": "PHQ-9", "item": 6, "definition": "Feeling bad about yourself, a failure, or that you have let people down"},
+    {"name": "concentration_problems",    "instrument": "PHQ-9", "item": 7, "definition": "Trouble concentrating, remembering or thinking clearly"},
+    {"name": "psychomotor_change",        "instrument": "PHQ-9", "item": 8, "definition": "Moving or speaking slowly, or being fidgety and restless"},
+    {"name": "suicidal_thoughts",         "instrument": "PHQ-9", "item": 9, "definition": "Thoughts of being better off dead or of hurting yourself"},
+
+    {"name": "nervousness",               "instrument": "GAD-7", "item": 1, "definition": "Feeling nervous, anxious or on edge"},
+    {"name": "uncontrollable_worry",      "instrument": "GAD-7", "item": 2, "definition": "Not being able to stop or control worrying"},
+    {"name": "excessive_worry",           "instrument": "GAD-7", "item": 3, "definition": "Worrying too much about different things"},
+    {"name": "trouble_relaxing",          "instrument": "GAD-7", "item": 4, "definition": "Trouble relaxing"},
+    {"name": "restlessness",              "instrument": "GAD-7", "item": 5, "definition": "Being so restless that it is hard to sit still"},
+    {"name": "irritability",              "instrument": "GAD-7", "item": 6, "definition": "Becoming easily annoyed, angry or irritable"},
+    {"name": "fear_apprehension",         "instrument": "GAD-7", "item": 7, "definition": "Feeling afraid as if something awful might happen"},
+
+    {"name": "hopelessness",              "instrument": "extra", "item": null, "definition": "Belief that the future holds nothing good and cannot improve"},
+    {"name": "emptiness",                 "instrument": "extra", "item": null, "definition": "Feeling hollow, numb or empty inside (DSM-5 MDD criterion A1 descriptor)"},
+    {"name": "loneliness",                "instrument": "extra", "item": null, "definition": "Feeling alone, disconnected or without companionship"},
+    {"name": "low_self_esteem",           "instrument": "extra", "item": null, "definition": "Persistently negative evaluation of one's own worth or ability"},
+    {"name": "thwarted_belongingness",    "instrument": "extra", "item": null, "definition": "Unmet need to belong; social alienation (interpersonal theory of suicide)"},
+    {"name": "perceived_burdensomeness",  "instrument": "extra", "item": null, "definition": "Belief that one is a liability or burden to others"}
+  ],
+  "label_map": {
+    "depressionemo": {
+      "sadness": "depressed_mood",
+      "emptiness": "emptiness",
+      "hopelessness": "hopelessness",
+      "loneliness": "loneliness",
+      "worthlessness": "worthlessness_guilt",
+      "brain dysfunction (forget)": "concentration_problems",
+      "suicide intent": "suicidal_thoughts",
+      "anger": "irritability"
+    },
+    "irf": {"belong": "thwarted_belongingness", "burden": "perceived_burdensomeness"},
+    "lost": {"self": "low_self_esteem"}
+  },
+  "exhaustive_sources": {
+    "comment": "Sources whose annotation scheme is exhaustive over its own label set, so an absent label means the symptom is genuinely absent (0) rather than unknown (-1).",
+    "depressionemo": ["sadness", "emptiness", "hopelessness", "loneliness", "worthlessness", "brain dysfunction (forget)", "suicide intent", "anger"],
+    "irf": ["belong", "burden"],
+    "lost": ["self"]
+  },
+  "subreddit_disorder_map": {
+    "depression": "depression",
+    "anxiety": "anxiety",
+    "socialanxiety": "anxiety",
+    "healthanxiety": "anxiety",
+    "bipolarreddit": "bipolar",
+    "schizophrenia": "schizophrenia",
+    "ptsd": "ptsd",
+    "bpd": "bpd",
+    "adhd": "adhd",
+    "autism": "autism",
+    "EDAnonymous": "eating_disorder",
+    "suicidewatch": "suicidality",
+    "lonely": "loneliness",
+    "addiction": "substance_use",
+    "alcoholism": "substance_use",
+    "mentalhealth": "mixed",
+    "COVID19_support": "mixed",
+    "conspiracy": "control",
+    "divorce": "control",
+    "fitness": "control",
+    "guns": "control",
+    "jokes": "control",
+    "legaladvice": "control",
+    "meditation": "control",
+    "parenting": "control",
+    "personalfinance": "control",
+    "relationships": "control",
+    "teaching": "control"
+  },
+  "severity_scales": {
+    "severity_depression": {"minimum": 0, "mild": 1, "moderate": 2, "severe": 3},
+    "severity_risk": {"Supportive": 0, "Indicator": 1, "Ideation": 2, "Behavior": 3, "Attempt": 4}
+  }
+}
