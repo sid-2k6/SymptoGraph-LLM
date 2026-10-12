@@ -79,6 +79,24 @@ No open dataset labels GAD-7 symptoms, so build a small one:
 
 ## 8. Download commands
 
+**Into Google Drive (Colab):** open
+[`notebooks/download_data_to_drive.ipynb`](https://colab.research.google.com/github/sid-2k6/SymptoGraph-LLM/blob/main/notebooks/download_data_to_drive.ipynb)
+in Colab. It downloads on Colab's network and writes the result to your Drive,
+so nothing transfers through your own machine.
+
+**Locally:**
+
+```bash
+bash scripts/download_data.sh          # everything into ./data
+python scripts/slim_rmhd.py            # Reddit MH: 3.14 GB -> 0.41 GB
+```
+
+Options: `DATA_DIR`, `SKIP`, `RMHD_FILTER`, `JOBS` (see `data/README.md`).
+
+<details>
+<summary>Equivalent manual commands</summary>
+
+
 ```bash
 mkdir -p data && cd data
 git clone --depth 1 https://github.com/abuBakarSiddiqurRahman/DepressionEmo.git
@@ -93,6 +111,8 @@ mkdir -p rmhd && (cd rmhd && xargs -n1 -P4 wget -q < ../rmhd_urls.txt)
 # Dreaddit
 python -c "from datasets import load_dataset; load_dataset('andreagasparini/dreaddit').save_to_disk('dreaddit')"
 ```
+
+</details>
 
 ## 9. Quick-access options (not required)
 
