@@ -84,6 +84,39 @@ class TrainConfig:
 # --------------------------------------------------------------------------- #
 # data
 # --------------------------------------------------------------------------- #
+# Config fields that change the shape of the network. If any of these differs
+# from the checkpoint, resuming is impossible and must fail with a clear message
+# rather than a bare tensor-shape error.
+ARCH_FIELDS = ("hidden_dim", "dropout", "embed_dim", "vocab_size", "tfidf_features",
+               "max_length", "transformer_name", "transformer_fallback")
+
+
+def architecture_fingerprint(name: str, cfg: "TrainConfig", onto: Ontology) -> tuple:
+    """Short hash of everything that determines the parameter shapes."""
+    import hashlib
+    fields = {"baseline": name, "n_symptoms": len(onto.symptoms),
+              **{f: getattr(cfg, f) for f in ARCH_FIELDS}}
+    blob = json.dumps(fields, sort_keys=True, default=str).encode()
+    return hashlib.md5(blob).hexdigest()[:12], fields
+
+
+def _check_checkpoint_compatible(ck: dict, fingerprint: str, fields: dict,
+                                 ckpt_path: str, out_dir: str) -> None:
+    """Refuse to resume from a checkpoint built with a different architecture."""
+    saved = ck.get("fingerprint")
+    if saved is None or saved == fingerprint:
+        return
+    old = ck.get("fingerprint_fields", {})
+    changed = {k: (old.get(k), v) for k, v in fields.items() if old.get(k) != v}
+    lines = "\n".join(f"    {k}: checkpoint={o!r} now={n!r}" for k, (o, n) in changed.items())
+    raise RuntimeError(
+        f"Refusing to resume: {ckpt_path} was written with a different architecture.\n"
+        f"{lines}\n\n"
+        f"This usually means a quick-test run and a full run shared an output folder.\n"
+        f"Delete the stale run and start this one fresh:\n"
+        f"    !rm -rf {out_dir}")
+
+
 def set_seed(seed: int) -> None:
     import torch
     random.seed(seed)
@@ -446,10 +479,20 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
         optimizer, int(cfg.warmup_ratio * steps), steps)
     scaler = torch.amp.GradScaler("cuda") if (cfg.amp and device == "cuda") else None
 
+    fingerprint, arch_fields = architecture_fingerprint(name, cfg, onto)
+
     start_epoch, best_score, best_epoch = 1, -math.inf, None
     if resume and os.path.isfile(last_ckpt):
         ck = torch.load(last_ckpt, map_location=device, weights_only=False)
-        model.load_state_dict(ck["model"])
+        _check_checkpoint_compatible(ck, fingerprint, arch_fields, last_ckpt, out_dir)
+        try:
+            model.load_state_dict(ck["model"])
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"checkpoint in {out_dir} does not match the current configuration.\n"
+                f"It was almost certainly written by a different run (a quick test, "
+                f"for example).\nDelete that folder and start again:\n"
+                f"    !rm -rf {out_dir}\n\noriginal error: {exc}") from exc
         optimizer.load_state_dict(ck["optimizer"])
         scheduler.load_state_dict(ck["scheduler"])
         if scaler is not None and ck.get("scaler"):
@@ -467,6 +510,7 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
         json.dump({"baseline": name, "seed": seed, "device": device,
                    "learning_rate": cfg.lr_for(name),
                    "encoder": getattr(model, "loaded_name", name),
+                   "architecture_fingerprint": fingerprint,
                    **asdict(cfg)}, fh, indent=2, default=str)
 
     if start_epoch > cfg.epochs and verbose:
@@ -498,11 +542,14 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
             best_score, best_epoch = score, epoch
             torch.save({"model": model.state_dict(), "epoch": epoch,
                         "best_score": best_score, "best_epoch": best_epoch,
-                        "baseline": name, "seed": seed}, best_ckpt)
+                        "baseline": name, "seed": seed,
+                        "fingerprint": fingerprint,
+                        "fingerprint_fields": arch_fields}, best_ckpt)
         torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(),
                     "scheduler": scheduler.state_dict(),
                     "scaler": scaler.state_dict() if scaler else None,
                     "epoch": epoch, "best_score": best_score, "best_epoch": best_epoch,
+                    "fingerprint": fingerprint, "fingerprint_fields": arch_fields,
                     "rng": {"python": random.getstate(), "numpy": np.random.get_state(),
                             "torch": torch.get_rng_state()}}, last_ckpt)
 
@@ -516,6 +563,7 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
     history = pd.read_csv(history_path)
     if os.path.isfile(best_ckpt):
         ck = torch.load(best_ckpt, map_location=device, weights_only=False)
+        _check_checkpoint_compatible(ck, fingerprint, arch_fields, best_ckpt, out_dir)
         model.load_state_dict(ck["model"])
     _, final_train = _run_epoch(model, loaders["train"], cfg, onto,
                                 device=device, train=False)
