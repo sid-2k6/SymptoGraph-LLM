@@ -21,6 +21,12 @@ JOBS=4 bash scripts/download_data.sh                        # fewer parallel dow
 
 The script is resumable, and every Reddit Mental Health file is checked against its Zenodo checksum.
 
+To confirm a copy is complete (useful after copying to Google Drive, where folder sizes are hidden):
+
+```bash
+python scripts/verify_data.py --data data        # add --deep for a full row count
+```
+
 To download straight into Google Drive instead, open `notebooks/download_data_to_drive.ipynb` in Colab.
 
 ## Shrinking the Reddit Mental Health Dataset
