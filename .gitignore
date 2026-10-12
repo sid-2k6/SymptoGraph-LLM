@@ -6,3 +6,6 @@ processed/*
 __pycache__/
 *.pyc
 .venv/
+graph_out/
+nb4_sim/
+wl_*/

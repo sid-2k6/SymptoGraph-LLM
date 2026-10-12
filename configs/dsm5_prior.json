@@ -1,0 +1,58 @@
+{
+  "description": "DSM-5-informed symptom-to-disorder prior adjacency for the SymptoGraph-LLM comorbidity graph (novelty N2). Each list gives the unified symptoms that are diagnostic criteria for, or are strongly characteristic of, that disorder. This prior is the A0 term in A = A0 + dA, where dA is learned.",
+  "provenance": "Authored by the project from DSM-5 criterion sets and the PHQ-9 / GAD-7 item content. It encodes clinical structure, not annotated data, and should be reviewed by a clinician before publication. The notebook reports which prior edges the training data supports empirically.",
+  "edges": {
+    "depression": [
+      "anhedonia", "depressed_mood", "sleep_disturbance", "fatigue", "appetite_change",
+      "worthlessness_guilt", "concentration_problems", "psychomotor_change",
+      "suicidal_thoughts", "hopelessness", "emptiness"
+    ],
+    "anxiety": [
+      "nervousness", "uncontrollable_worry", "excessive_worry", "trouble_relaxing",
+      "restlessness", "irritability", "fear_apprehension", "sleep_disturbance",
+      "fatigue", "concentration_problems"
+    ],
+    "bipolar": [
+      "depressed_mood", "anhedonia", "sleep_disturbance", "psychomotor_change",
+      "irritability", "concentration_problems", "restlessness"
+    ],
+    "ptsd": [
+      "sleep_disturbance", "concentration_problems", "irritability",
+      "fear_apprehension", "emptiness", "restlessness", "nervousness"
+    ],
+    "bpd": [
+      "emptiness", "irritability", "suicidal_thoughts", "low_self_esteem",
+      "loneliness", "thwarted_belongingness"
+    ],
+    "adhd": [
+      "concentration_problems", "restlessness", "psychomotor_change", "irritability"
+    ],
+    "autism": [
+      "loneliness", "thwarted_belongingness", "nervousness"
+    ],
+    "eating_disorder": [
+      "appetite_change", "worthlessness_guilt", "low_self_esteem", "depressed_mood"
+    ],
+    "schizophrenia": [
+      "anhedonia", "emptiness", "concentration_problems", "psychomotor_change",
+      "fear_apprehension"
+    ],
+    "suicidality": [
+      "suicidal_thoughts", "hopelessness", "perceived_burdensomeness",
+      "thwarted_belongingness", "worthlessness_guilt", "depressed_mood", "emptiness"
+    ],
+    "substance_use": [
+      "anhedonia", "irritability", "sleep_disturbance", "worthlessness_guilt"
+    ],
+    "loneliness": [
+      "loneliness", "thwarted_belongingness", "emptiness", "depressed_mood"
+    ],
+    "mixed": [],
+    "control": []
+  },
+  "notes": [
+    "'mixed' is the r/mentalhealth and r/COVID19_support pool and carries no prior.",
+    "'control' covers the non-clinical subreddits and deliberately carries no prior, so the model must rely on observed symptoms rather than a disorder shortcut.",
+    "Shared symptoms across disorders are intentional: they are what lets the graph propagate evidence between comorbid conditions."
+  ]
+}
