@@ -24,7 +24,7 @@ All datasets below can be downloaded immediately, with no data-use agreement, em
 | **DepSeverity** (Naseem et al., 2022, WWW) | 3,553 posts | minimum 2,587 / mild 290 / moderate 394 / severe 282 | **Ordinal severity head** (CORAL) | Public research data | `github.com/usmaann/Depression_Severity_Dataset` |
 | **CSSRS-Reddit-500** (Gaur et al., 2019, WWW) | 500 users | Supportive 108 / Indicator 99 / Ideation 171 / Behavior 77 / Attempt 45 | **Suicide-risk severity**; testing abstention on high-risk cases (N6) | Public, anonymised | `github.com/manasgaur/Knowledge-aware-Assessment-of-Severity-of-Suicide-Risk-for-Early-Intervention` |
 | **IMHI** (Yang et al., 2024, WWW, MentaLLaMA) | ~105k instruction samples | Label + human-checked explanations across 10 sources | **Rationale LLM SFT and explanation evaluation** (N4) | MIT | `github.com/SteveKGYang/MentalLLaMA` (`train_data/`, `test_data/`) |
-| **Dreaddit** (Turcan & McKeown, 2019) | 3,553 segments | Stress yes/no | **Out-of-domain generalisation test** | Public research data | Hugging Face `andreagasparini/dreaddit` |
+| **Dreaddit** (Turcan & McKeown, 2019) | 3,553 segments | Stress yes/no | **Auxiliary stress label on the DepSeverity posts** (see Section 10) | Public research data | Hugging Face `andreagasparini/dreaddit` |
 | *Optional:* **IRF** (Garg et al., ACL 2023) | 3,522 posts | Thwarted belongingness, perceived burdensomeness + explanation spans | Extra concepts (suicide-risk factors) + span-level **faithfulness** checks | Free for research | `github.com/drmuskangarg/Irf` |
 | *Optional:* **LoST** (Garg et al., 2023) | Reddit posts | Low self-esteem + spans | Extra concept for "worthlessness" | Free for research | `github.com/drmuskangarg/LoST` |
 
@@ -80,7 +80,7 @@ No open dataset labels GAD-7 symptoms, so build a small one:
 ## 8. Download commands
 
 **Into Google Drive (Colab):** open
-[`notebooks/download_data_to_drive.ipynb`](https://colab.research.google.com/github/sid-2k6/SymptoGraph-LLM/blob/main/notebooks/download_data_to_drive.ipynb)
+[`notebooks/01_download_data_to_drive.ipynb`](https://colab.research.google.com/github/sid-2k6/SymptoGraph-LLM/blob/main/notebooks/01_download_data_to_drive.ipynb)
 in Colab. It downloads on Colab's network and writes the result to your Drive,
 so nothing transfers through your own machine.
 
@@ -121,3 +121,48 @@ These can be added later if time allows:
 - **SWMH:** on Hugging Face (`AIMH/SWMH`, CC BY-NC 4.0) with automatic approval. Log in and click accept, and access is immediate.
 - **ReDSM5** (Bao et al., 2025): 1,484 posts with sentence-level labels for all nine DSM-5 depression symptoms by a psychologist, plus rationales. This is the closest match to PsySym, but it needs an emailed agreement; only a 25-post preview is open.
 - **PRIMATE:** needs a signed agreement form, after which the link is sent immediately.
+
+## 10. Corpus overlap and leakage control
+
+Running `notebooks/02_preprocess_and_split.ipynb` over the downloaded data turned
+up substantial overlap between these public corpora. Measured, not assumed:
+
+| Finding | Effect on the design |
+|---|---|
+| **DepSeverity is a re-annotation of Dreaddit** - the same 3,526 posts, severity labels in one and binary stress labels in the other | Dreaddit cannot be the out-of-domain test set. Both label sets now attach to one post pool (`severity_stress`), and stress becomes an auxiliary target |
+| **LoST and IRF share 3,089 posts** | Merged into one pool (`concept_spans`) and split once |
+| **IMHI re-packages the IRF and Dreaddit posts** behind a `"Post: "` prefix and truncates them | Exact-match deduplication misses this; matching uses a normalised 200-character prefix key |
+| **23.3% of Reddit Mental Health authors (192,893 of 826,961) appear in more than one file** | Reddit posts are split author-disjoint, never at random |
+| **85,659 Reddit posts are duplicated across the period files** | Removed, so the pre/mid-COVID temporal split stays clean |
+| Of 46,542 rows in the labelled corpora, only **19,762 are distinct posts** | Splitting happens once, globally, over unique posts |
+
+**External evaluation.** Because Dreaddit is no longer usable as a held-out
+domain, external evaluation uses the IMHI subsets that overlap nothing else in
+the collection: `swmh`, `CAMS`, `t-sid`, `loneliness` and `DR`. These are
+test-only by construction.
+
+### Processed outputs
+
+`notebooks/02_preprocess_and_split.ipynb` writes to `processed/`:
+
+| File | Contents |
+|---|---|
+| `labelled.parquet` | 19,762 unique posts with symptom, severity, risk, stress, span and explanation labels |
+| `weak_pool.parquet` | 1,017,959 Reddit posts for LLM weak labelling (N3), author-disjoint, 427 MB |
+| `label_coverage.csv` | Which of the 22 symptoms have gold labels and which need weak labels |
+| `manifest.json` | Counts, settings and the leakage audit |
+
+Symptom columns use `1` present, `0` absent and `-1` not annotated by that
+source. Only non-negative entries should contribute to the concept loss, since
+treating `-1` as a negative would teach the model that unannotated symptoms are
+absent.
+
+**Gold coverage.** 11 of the 22 unified symptoms have gold labels. The other 11,
+mostly GAD-7 anxiety items, have no open gold data, which is precisely the gap
+LLM weak supervision (N3) and the small in-house anxiety set (Section 4) address.
+Reporting symptom F1 separately for the two groups is what makes that claim
+measurable.
+
+The run peaks near 1.7 GB of RAM because the Reddit pool is streamed file by
+file; a single in-memory pass needs about 16 GB and will not fit a free Colab
+runtime.

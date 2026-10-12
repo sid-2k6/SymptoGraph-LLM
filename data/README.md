@@ -27,7 +27,7 @@ To confirm a copy is complete (useful after copying to Google Drive, where folde
 python scripts/verify_data.py --data data        # add --deep for a full row count
 ```
 
-To download straight into Google Drive instead, open `notebooks/download_data_to_drive.ipynb` in Colab.
+To download straight into Google Drive instead, open `notebooks/01_download_data_to_drive.ipynb` in Colab.
 
 ## Shrinking the Reddit Mental Health Dataset
 
