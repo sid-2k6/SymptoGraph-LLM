@@ -77,3 +77,13 @@ df = pd.read_csv('data/reddit_mental_health_slim/depression_pre.csv.gz', compres
 - Paraphrase any example posts quoted in the paper, and do not attempt to identify users.
 - Run LLM weak labelling with a locally hosted open model rather than a third-party API.
 - See `docs/Datasets.md` for the full dataset plan and the symptom mapping.
+
+## Pipeline
+
+| Notebook | Writes to | Purpose |
+|---|---|---|
+| `01_download_data_to_drive.ipynb` | `data/` | download the eight open datasets |
+| `02_preprocess_and_split.ipynb` | `processed/` | canonical schema, leakage-controlled splits |
+| `03_build_symptom_graph.ipynb` | `graph/` | symptom-disorder comorbidity graph (N2) |
+| `04_llm_weak_labelling.ipynb` | `weak_labels/` | weak labels for the 11 unannotated symptoms (N3) |
+| `05_baselines_multiseed.ipynb` | `baselines/` | three baselines, three seeds, mean +/- std |
