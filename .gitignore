@@ -1,0 +1,6 @@
+# Raw datasets: re-create with `bash scripts/download_data.sh`
+data/*
+!data/README.md
+__pycache__/
+*.pyc
+.venv/
