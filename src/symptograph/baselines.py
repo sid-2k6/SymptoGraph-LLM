@@ -67,6 +67,9 @@ class TrainConfig:
         "symptoms": 1.0, "severity": 1.0, "risk": 1.0, "stress": 0.5})
     transformer_name: str = "mental/mental-roberta-base"
     transformer_fallback: str = "roberta-base"
+    # mental/mental-roberta-base is a gated repo. Without this, a 403 silently
+    # substitutes roberta-base and the run is still labelled "mentalroberta".
+    strict_encoder: bool = False
     tfidf_features: int = 30_000
     vocab_size: int = 30_000
     embed_dim: int = 200
@@ -317,12 +320,25 @@ def build_model(name: str, cfg: TrainConfig, onto: Ontology, train_texts):
     if name == "mentalroberta":
         from transformers import AutoTokenizer
         model_name = cfg.transformer_name
+        fallback_used = False
         try:
             tok = AutoTokenizer.from_pretrained(model_name)
             model = TransformerEnc(model_name)
         except Exception as exc:                  # offline or gated
-            print(f"  could not load {model_name} ({type(exc).__name__}); "
-                  f"falling back to {cfg.transformer_fallback}")
+            if cfg.strict_encoder:
+                raise RuntimeError(
+                    f"Could not load the requested encoder {model_name!r}: "
+                    f"{type(exc).__name__}: {exc}\n\n"
+                    f"strict_encoder=True, so this will not silently fall back to "
+                    f"{cfg.transformer_fallback!r}. A baseline named "
+                    f"'mentalroberta' that actually ran RoBERTa would misreport "
+                    f"the comparison.") from exc
+            print("  " + "!" * 68)
+            print(f"  WARNING: could not load {model_name} ({type(exc).__name__}).")
+            print(f"  FALLING BACK to {cfg.transformer_fallback}. This baseline is "
+                  f"NOT MentalRoBERTa.")
+            print("  " + "!" * 68, flush=True)
+            fallback_used = True
             model_name = cfg.transformer_fallback
             tok = AutoTokenizer.from_pretrained(model_name)
             model = TransformerEnc(model_name)
@@ -331,6 +347,7 @@ def build_model(name: str, cfg: TrainConfig, onto: Ontology, train_texts):
             return tok(list(texts), padding=True, truncation=True,
                        max_length=cfg.max_length, return_tensors="pt")
         model.loaded_name = model_name
+        model.encoder_fallback_used = fallback_used
         return model, "hf", helper
 
     raise ValueError(f"unknown baseline {name!r}")
@@ -510,6 +527,8 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
         json.dump({"baseline": name, "seed": seed, "device": device,
                    "learning_rate": cfg.lr_for(name),
                    "encoder": getattr(model, "loaded_name", name),
+                   "encoder_requested": cfg.transformer_name if name == "mentalroberta" else name,
+                   "encoder_fallback_used": getattr(model, "encoder_fallback_used", False),
                    "architecture_fingerprint": fingerprint,
                    **asdict(cfg)}, fh, indent=2, default=str)
 
@@ -575,6 +594,7 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
     payload = {
         "baseline": name, "seed": seed,
         "encoder": getattr(model, "loaded_name", name),
+        "encoder_fallback_used": getattr(model, "encoder_fallback_used", False),
         "learning_rate": cfg.lr_for(name),
         "selection_metric": cfg.selection_metric,
         "best_epoch": best_epoch, "best_val_score": None if best_score == -math.inf else best_score,
