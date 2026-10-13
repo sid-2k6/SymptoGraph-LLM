@@ -500,3 +500,312 @@ def build_leaderboard(root: str, out_dir: str) -> tuple[pd.DataFrame, dict]:
         fh.write("\n")
     plot_comparison(tables, out_dir)
     return combined, tables
+
+
+# --------------------------------------------------------------------------- #
+# publication styling
+# --------------------------------------------------------------------------- #
+PUB_FONT = 20
+PUB_DPI = 300
+
+
+def set_publication_style(font_size: int = PUB_FONT) -> None:
+    """Large fonts and heavy lines, for figures that go straight into the paper."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams.update({
+        "font.size": font_size,
+        "axes.titlesize": font_size + 2,
+        "axes.labelsize": font_size,
+        "xtick.labelsize": font_size - 4,
+        "ytick.labelsize": font_size - 4,
+        "legend.fontsize": font_size - 4,
+        "figure.titlesize": font_size + 4,
+        "axes.linewidth": 1.4,
+        "lines.linewidth": 2.4,
+        "lines.markersize": 8,
+        "grid.alpha": 0.3,
+        "savefig.dpi": PUB_DPI,
+        "figure.dpi": 110,
+        "savefig.bbox": "tight",
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    })
+
+
+def _save(fig, path: str, dpi: int = PUB_DPI) -> str:
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    import matplotlib.pyplot as plt
+    plt.close(fig)
+    return path
+
+
+# --------------------------------------------------------------------------- #
+# selective prediction (novelty N6)
+# --------------------------------------------------------------------------- #
+def selective_metrics(prob: np.ndarray, y: np.ndarray, uncertainty: np.ndarray,
+                      n_points: int = 20) -> dict:
+    """Risk-coverage behaviour when the most uncertain predictions are deferred.
+
+    ``risk`` is the error rate on the retained predictions. ``aurc`` is the area
+    under the risk-coverage curve, so **lower is better**. A model whose
+    uncertainty is informative shows risk falling as coverage drops.
+    """
+    mask = y >= 0
+    if not mask.any():
+        return {"aurc": None, "risk_at_full_coverage": None, "curve": []}
+    p, t, u = prob[mask], y[mask].astype(int), uncertainty[mask]
+    wrong = ((p >= 0.5).astype(int) != t).astype(float)
+    order = np.argsort(u)                       # most certain first
+    wrong_sorted = wrong[order]
+
+    curve, risks = [], []
+    for frac in np.linspace(1.0 / n_points, 1.0, n_points):
+        k = max(int(round(frac * len(wrong_sorted))), 1)
+        risk = float(wrong_sorted[:k].mean())
+        curve.append({"coverage": round(float(k / len(wrong_sorted)), 4),
+                      "risk": round(risk, 4), "n_retained": k})
+        risks.append(risk)
+    return {"aurc": float(np.mean(risks)),
+            "risk_at_full_coverage": float(wrong.mean()),
+            "risk_at_80_coverage": curve[int(0.8 * n_points) - 1]["risk"],
+            "risk_at_50_coverage": curve[int(0.5 * n_points) - 1]["risk"],
+            "curve": curve}
+
+
+def plot_risk_coverage(selective: dict, out_dir: str, title: str = "",
+                       font_size: int = PUB_FONT) -> str | None:
+    if not selective or not selective.get("curve"):
+        return None
+    set_publication_style(font_size)
+    import matplotlib.pyplot as plt
+    os.makedirs(out_dir, exist_ok=True)
+    cov = [c["coverage"] for c in selective["curve"]]
+    risk = [c["risk"] for c in selective["curve"]]
+    fig, ax = plt.subplots(figsize=(9, 7))
+    ax.plot(cov, risk, "-o")
+    ax.axhline(selective["risk_at_full_coverage"], ls="--", color="grey",
+               label="no abstention")
+    ax.set_xlabel("coverage")
+    ax.set_ylabel("risk (error rate)")
+    ax.set_title(f"{title}\nAURC = {selective['aurc']:.3f} (lower is better)")
+    ax.grid(True)
+    ax.legend()
+    return _save(fig, os.path.join(out_dir, "risk_coverage.png"))
+
+
+# --------------------------------------------------------------------------- #
+# publication-quality reporting
+# --------------------------------------------------------------------------- #
+def plot_history_pub(history: pd.DataFrame, out_dir: str, title: str = "",
+                     font_size: int = PUB_FONT) -> list[str]:
+    """Train-versus-validation curves, one large panel per metric."""
+    set_publication_style(font_size)
+    import matplotlib.pyplot as plt
+    os.makedirs(out_dir, exist_ok=True)
+    saved = []
+
+    panels = [
+        ("loss", "train_loss", "val_loss", "loss"),
+        ("composite", "train_composite", "val_composite", "composite"),
+        ("symptom_macro_f1", "train_group_all_macro_f1", "val_group_all_macro_f1",
+         "symptom macro F1"),
+        ("symptom_macro_auroc", "train_group_all_macro_auroc",
+         "val_group_all_macro_auroc", "symptom macro AUROC"),
+        ("severity_qwk", "train_severity_depression_qwk",
+         "val_severity_depression_qwk", "severity QWK"),
+        ("risk_qwk", "train_severity_risk_qwk", "val_severity_risk_qwk", "risk QWK"),
+    ]
+    for key, tr, va, ylabel in panels:
+        if tr not in history and va not in history:
+            continue
+        fig, ax = plt.subplots(figsize=(9, 7))
+        if tr in history:
+            ax.plot(history["epoch"], history[tr], "-o", label="train")
+        if va in history:
+            ax.plot(history["epoch"], history[va], "-s", label="validation")
+        ax.set_xlabel("epoch")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.grid(True)
+        ax.legend()
+        saved.append(_save(fig, os.path.join(out_dir, f"curve_{key}.png")))
+
+    # combined overview
+    fig, axes = plt.subplots(2, 3, figsize=(26, 14))
+    for ax, (key, tr, va, ylabel) in zip(axes.ravel(), panels):
+        if tr in history:
+            ax.plot(history["epoch"], history[tr], "-o", label="train")
+        if va in history:
+            ax.plot(history["epoch"], history[va], "-s", label="validation")
+        ax.set_xlabel("epoch")
+        ax.set_ylabel(ylabel)
+        ax.grid(True)
+        ax.legend()
+    fig.suptitle(title)
+    fig.tight_layout()
+    saved.append(_save(fig, os.path.join(out_dir, "curves_overview.png")))
+    return saved
+
+
+def plot_per_symptom_pub(train_bundle: dict, val_bundle: dict, out_dir: str,
+                         title: str = "", font_size: int = PUB_FONT) -> str | None:
+    """Per-symptom F1, train against validation."""
+    set_publication_style(font_size)
+    import matplotlib.pyplot as plt
+    os.makedirs(out_dir, exist_ok=True)
+    names = [s for s, v in val_bundle["per_symptom"].items() if v["n"] > 0]
+    if not names:
+        return None
+    tr = [(train_bundle["per_symptom"].get(s, {}).get("f1") or 0) for s in names]
+    va = [(val_bundle["per_symptom"][s]["f1"] or 0) for s in names]
+    x = np.arange(len(names))
+    fig, ax = plt.subplots(figsize=(max(12, 1.05 * len(names)), 8))
+    ax.bar(x - 0.2, tr, 0.4, label="train")
+    ax.bar(x + 0.2, va, 0.4, label="validation")
+    ax.set_xticks(x)
+    ax.set_xticklabels([n.replace("_", " ") for n in names], rotation=45, ha="right")
+    ax.set_ylabel("F1")
+    ax.set_ylim(0, 1)
+    ax.set_title(title)
+    ax.grid(True, axis="y")
+    ax.legend()
+    return _save(fig, os.path.join(out_dir, "per_symptom_f1.png"))
+
+
+def plot_ladder(tables: dict, out_dir: str, order: list[str],
+                metrics=("composite", "symptom_macro_f1[all]",
+                         "severity_depression_qwk", "severity_risk_qwk"),
+                font_size: int = PUB_FONT) -> list[str]:
+    """Ablation ladder: each metric against the rungs, in ladder order."""
+    set_publication_style(font_size)
+    import matplotlib.pyplot as plt
+    os.makedirs(out_dir, exist_ok=True)
+    rungs = [r for r in order if r in tables]
+    if not rungs:
+        return []
+    saved = []
+    for metric in metrics:
+        means, stds = [], []
+        for r in rungs:
+            t = tables[r].set_index("metric")
+            means.append(t["mean"].get(metric) if metric in t.index else None)
+            stds.append(t["std"].get(metric) if metric in t.index else None)
+        if all(m is None for m in means):
+            continue
+        fig, ax = plt.subplots(figsize=(max(11, 2.6 * len(rungs)), 8))
+        xs = np.arange(len(rungs))
+        ax.errorbar(xs, [0 if m is None else m for m in means],
+                    yerr=[0 if s is None else s for s in stds],
+                    fmt="-o", capsize=6)
+        ax.set_xticks(xs)
+        ax.set_xticklabels(rungs, rotation=30, ha="right")
+        ax.set_ylabel(metric.replace("_", " "))
+        ax.set_title(f"Ablation ladder: {metric.replace('_', ' ')}")
+        ax.grid(True)
+        saved.append(_save(fig, os.path.join(out_dir, f"ladder_{_slug(metric)}.png")))
+
+    # all metrics on one axis
+    fig, ax = plt.subplots(figsize=(max(12, 2.8 * len(rungs)), 8))
+    xs = np.arange(len(rungs))
+    for metric in metrics:
+        means, stds = [], []
+        for r in rungs:
+            t = tables[r].set_index("metric")
+            means.append(t["mean"].get(metric) if metric in t.index else None)
+            stds.append(t["std"].get(metric) if metric in t.index else None)
+        if all(m is None for m in means):
+            continue
+        ax.errorbar(xs, [np.nan if m is None else m for m in means],
+                    yerr=[0 if s is None else s for s in stds],
+                    fmt="-o", capsize=5, label=metric.replace("_", " "))
+    ax.set_xticks(xs)
+    ax.set_xticklabels(rungs, rotation=30, ha="right")
+    ax.set_ylabel("score")
+    ax.set_title("Ablation ladder")
+    ax.grid(True)
+    ax.legend(fontsize=font_size - 6)
+    saved.append(_save(fig, os.path.join(out_dir, "ladder_all_metrics.png")))
+    return saved
+
+
+def plot_comparison_pub(tables: dict, out_dir: str, filename: str = "comparison.png",
+                        metrics=("composite", "symptom_macro_f1[all]",
+                                 "severity_depression_qwk", "severity_risk_qwk"),
+                        title: str = "Model comparison",
+                        font_size: int = PUB_FONT) -> str | None:
+    """Grouped bars with error bars, publication sized."""
+    set_publication_style(font_size)
+    import matplotlib.pyplot as plt
+    os.makedirs(out_dir, exist_ok=True)
+    models = list(tables)
+    if not models:
+        return None
+    fig, ax = plt.subplots(figsize=(max(13, 3.4 * len(metrics)), 8))
+    width = 0.8 / max(len(models), 1)
+    for i, name in enumerate(models):
+        t = tables[name].set_index("metric")
+        means = [t["mean"].get(m) if m in t.index else None for m in metrics]
+        stds = [t["std"].get(m) if m in t.index else None for m in metrics]
+        xs = np.arange(len(metrics)) + i * width - 0.4 + width / 2
+        ax.bar(xs, [0 if v is None else v for v in means], width,
+               yerr=[0 if v is None else v for v in stds], capsize=5, label=name)
+    ax.set_xticks(np.arange(len(metrics)))
+    ax.set_xticklabels([m.replace("_", " ").replace("[all]", "") for m in metrics],
+                       rotation=20, ha="right")
+    ax.set_ylabel("score")
+    ax.set_title(title)
+    ax.grid(True, axis="y")
+    ax.legend(fontsize=font_size - 6)
+    return _save(fig, os.path.join(out_dir, filename))
+
+
+def _slug(text: str) -> str:
+    return "".join(ch if ch.isalnum() else "_" for ch in text).strip("_")
+
+
+def compare_runs(run_dirs: dict, out_dir: str, title: str = "Model comparison",
+                 ladder_order: list | None = None,
+                 font_size: int = PUB_FONT) -> tuple:
+    """Compare an explicit set of runs given ``{label: run_directory}``.
+
+    Each directory must contain ``aggregate/aggregate_metrics.json``, which every
+    baseline and every ablation rung writes, so comparisons need no extra code.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    tables, frames, test_frames = {}, [], []
+    for label, path in run_dirs.items():
+        meta = os.path.join(path, "aggregate", "aggregate_metrics.json")
+        if not os.path.isfile(meta):
+            continue
+        with open(meta, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        agg = payload.get("aggregate", payload)
+        tables[label] = headline_table(agg, label=label)
+        frames.append(tables[label])
+        by_split = payload.get("aggregate_by_split", {})
+        if "test" in by_split:
+            test_frames.append(headline_table(by_split["test"], label=label))
+    if not frames:
+        return pd.DataFrame(), tables
+
+    combined = pd.concat(frames, ignore_index=True)
+    combined.to_csv(os.path.join(out_dir, "all_runs_val.csv"), index=False)
+    wide = combined.pivot(index="metric", columns="model", values="formatted")
+    wide.to_csv(os.path.join(out_dir, "leaderboard_val.csv"))
+    if test_frames:
+        tc = pd.concat(test_frames, ignore_index=True)
+        tc.to_csv(os.path.join(out_dir, "all_runs_test.csv"), index=False)
+        tc.pivot(index="metric", columns="model", values="formatted").to_csv(
+            os.path.join(out_dir, "leaderboard_test.csv"))
+
+    with open(os.path.join(out_dir, "leaderboard.md"), "w", encoding="utf-8") as fh:
+        fh.write(f"# {title}\n\nmean +/- std across seeds (validation).\n\n")
+        fh.write(to_markdown_table(wide))
+        fh.write("\n")
+
+    plot_comparison_pub(tables, out_dir, title=title, font_size=font_size)
+    if ladder_order:
+        plot_ladder(tables, out_dir, ladder_order, font_size=font_size)
+    return combined, tables

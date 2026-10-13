@@ -87,3 +87,4 @@ df = pd.read_csv('data/reddit_mental_health_slim/depression_pre.csv.gz', compres
 | `03_build_symptom_graph.ipynb` | `graph/` | symptom-disorder comorbidity graph (N2) |
 | `04_llm_weak_labelling.ipynb` | `weak_labels/` | weak labels for the 11 unannotated symptoms (N3) |
 | `05_baselines_multiseed.ipynb` | `baselines/` | three baselines, three seeds, mean +/- std |
+| `06_symptograph_llm.ipynb` | `proposed/` | SymptoGraph-LLM as a 6-rung ablation ladder (N1, N2, N3, N5, N6) |
