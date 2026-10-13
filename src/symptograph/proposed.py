@@ -139,6 +139,38 @@ def architecture_fingerprint(rung: str, cfg: ProposedConfig, onto: Ontology) -> 
     return hashlib.md5(blob).hexdigest()[:12], fields
 
 
+# Encoders that are domain-pretrained for mental health. "gated: auto" means the
+# repo needs a Hugging Face login plus a one-click licence acceptance; it is not
+# a manual review queue.
+ENCODER_OPTIONS = {
+    "mental/mental-roberta-base": "MentalRoBERTa - the paper's choice. Gated (auto-approve).",
+    "mental/mental-bert-base-uncased": "MentalBERT. Gated (auto-approve).",
+    "emilyalsentzer/Bio_ClinicalBERT": "Clinical notes, domain-adjacent. Ungated.",
+    "roberta-base": "General domain. Ungated. Rename the run honestly if you use it.",
+}
+
+
+def check_encoder_access(name: str) -> dict:
+    """Probe whether an encoder can actually be downloaded, before training starts.
+
+    Loading only the config costs a few hundred bytes, which turns a failure six
+    hours into a run into a five-second pre-flight check.
+    """
+    from transformers import AutoConfig
+    try:
+        AutoConfig.from_pretrained(name)
+        return {"ok": True, "encoder": name, "reason": None}
+    except Exception as exc:
+        text = str(exc)
+        if "gated repo" in text or "403" in text:
+            reason = ("gated: accept the licence while logged in. Visit "
+                      f"https://huggingface.co/{name} , click 'Agree and access "
+                      "repository', then authenticate in this notebook.")
+        else:
+            reason = f"{type(exc).__name__}: {text.splitlines()[0]}"
+        return {"ok": False, "encoder": name, "reason": reason}
+
+
 def resolve_amp(cfg: "ProposedConfig", device: str):
     """Return ``(autocast_dtype, scaler)``; bfloat16 needs no scaler."""
     import torch
