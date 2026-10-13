@@ -13,3 +13,7 @@ baselines/
 baselines_*/
 bl_*/
 *.pt
+proposed/
+proposed_*/
+prop_*/
+wl_fake/
