@@ -41,6 +41,7 @@ import pandas as pd
 from .metrics import (aggregate_seeds, compute_metrics, flatten_metrics,
                       headline_table, plot_history, plot_per_symptom_bars,
                       plot_seed_aggregate)
+from .jsonio import write_json
 from .preprocess import Ontology
 from .rng import capture_rng_state, restore_rng_state
 
@@ -522,14 +523,14 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
             print(f"  resumed from epoch {ck['epoch']} "
                   f"(best {cfg.selection_metric}={best_score:.4f} @ {best_epoch})")
 
-    with open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8") as fh:
-        json.dump({"baseline": name, "seed": seed, "device": device,
+    write_json(os.path.join(out_dir, "config.json"),
+               {"baseline": name, "seed": seed, "device": device,
                    "learning_rate": cfg.lr_for(name),
                    "encoder": getattr(model, "loaded_name", name),
                    "encoder_requested": cfg.transformer_name if name == "mentalroberta" else name,
                    "encoder_fallback_used": getattr(model, "encoder_fallback_used", False),
-                   "architecture_fingerprint": fingerprint,
-                   **asdict(cfg)}, fh, indent=2, default=str)
+                "architecture_fingerprint": fingerprint,
+                **asdict(cfg)})
 
     if start_epoch > cfg.epochs and verbose:
         print(f"  already finished {cfg.epochs} epochs; re-evaluating from best checkpoint")
@@ -602,8 +603,7 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
         "splits": {k: int(len(v)) for k, v in frames.items()},
         "train": final_train, "val": final_val, "test": final_test,
     }
-    with open(os.path.join(out_dir, "performance_metrics.json"), "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, indent=2, default=str)
+    write_json(os.path.join(out_dir, "performance_metrics.json"), payload)
 
     plot_history(history, plots_dir, title=f"{name} seed {seed}")
     plot_per_symptom_bars(final_train, final_val, plots_dir, title=f"{name} seed {seed}")
@@ -641,8 +641,7 @@ def run_baseline(name: str, cfg: TrainConfig, processed_dir: str, root: str,
                "per_seed_best_epoch": {str(r["seed"]): r["best_epoch"] for r in runs},
                "aggregate": aggregates["val"],
                "aggregate_by_split": aggregates}
-    with open(os.path.join(agg_dir, "aggregate_metrics.json"), "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, indent=2, default=str)
+    write_json(os.path.join(agg_dir, "aggregate_metrics.json"), payload)
 
     table = headline_table(aggregates["val"], label=name)
     table.to_csv(os.path.join(agg_dir, "summary.csv"), index=False)

@@ -39,6 +39,7 @@ from .metrics import (aggregate_seeds, compute_metrics, flatten_metrics,
                       headline_table, plot_history_pub, plot_per_symptom_pub,
                       plot_risk_coverage, plot_seed_aggregate, selective_metrics,
                       set_publication_style)
+from .jsonio import write_json
 from .preprocess import Ontology
 from .rng import capture_rng_state, restore_rng_state
 
@@ -737,16 +738,16 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
             print(f"  resumed after epoch {ck['epoch']} "
                   f"(best {cfg.selection_metric}={best_score:.4f} @ epoch {best_epoch})")
 
-    with open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8") as fh:
-        json.dump({"rung": rung, "seed": seed, "device": device,
+    write_json(os.path.join(out_dir, "config.json"),
+               {"rung": rung, "seed": seed, "device": device,
                    "encoder": model.loaded_name,
                    "encoder_requested": model.encoder_requested,
                    "encoder_fallback_used": model.encoder_fallback_used,
                    "architecture_fingerprint": fingerprint,
                    "n_weak_rows": frames["train"]["n_weak_rows"],
-                   "trainable_parameters": sum(p.numel() for p in model.parameters()
-                                               if p.requires_grad),
-                   **asdict(cfg)}, fh, indent=2, default=str)
+                "trainable_parameters": sum(p.numel() for p in model.parameters()
+                                            if p.requires_grad),
+                **asdict(cfg)})
 
     if verbose and start_epoch > cfg.epochs:
         print(f"  all {cfg.epochs} epochs already done; re-evaluating best checkpoint")
@@ -784,9 +785,8 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
             best_score, best_epoch = score, epoch
             # keep this epoch's train metrics so no extra train pass is needed later
             best_train_bundle = tr_bundle
-            with open(os.path.join(out_dir, "best_train_metrics.json"), "w",
-                      encoding="utf-8") as fh:
-                json.dump(tr_bundle, fh, default=str)
+            write_json(os.path.join(out_dir, "best_train_metrics.json"),
+                       tr_bundle, indent=None)
             torch.save({"model": model.state_dict(), "epoch": epoch,
                         "best_score": best_score, "best_epoch": best_epoch,
                         "rung": rung, "seed": seed, "fingerprint": fingerprint,
@@ -852,9 +852,7 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
         "train": finals["train"], "val": finals["val"], "test": finals["test"],
         "selective": selectives,
     }
-    with open(os.path.join(out_dir, "performance_metrics.json"), "w",
-              encoding="utf-8") as fh:
-        json.dump(payload, fh, indent=2, default=str)
+    write_json(os.path.join(out_dir, "performance_metrics.json"), payload)
 
     set_publication_style()
     plot_history_pub(history, plots_dir, title=f"{rung} (seed {seed})")
@@ -895,9 +893,7 @@ def run_rung(rung: str, flags: dict, cfg: ProposedConfig, processed_dir: str,
                "per_seed_best_epoch": {str(r["seed"]): r["best_epoch"] for r in runs},
                "aggregate": aggregates["val"], "aggregate_by_split": aggregates,
                "config": asdict(rung_cfg)}
-    with open(os.path.join(agg_dir, "aggregate_metrics.json"), "w",
-              encoding="utf-8") as fh:
-        json.dump(payload, fh, indent=2, default=str)
+    write_json(os.path.join(agg_dir, "aggregate_metrics.json"), payload)
 
     headline_table(aggregates["val"], label=rung).to_csv(
         os.path.join(agg_dir, "summary.csv"), index=False)

@@ -36,6 +36,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from .jsonio import write_json
+
 CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "configs", "symptom_ontology.json")
 DEDUP_PREFIX = 200   # characters of normalised text used to match near-duplicates
 MIN_CHARS = 40       # posts shorter than this are dropped as uninformative
@@ -609,8 +611,7 @@ def save(df: pd.DataFrame, onto: Ontology, out_dir: str, stats: dict, report: di
             "IMHI subsets swmh/CAMS/t-sid/loneliness/DR are external and test-only.",
         ],
     }
-    with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:
-        json.dump(manifest, fh, indent=2)
+    write_json(os.path.join(out_dir, "manifest.json"), manifest)
     paths["manifest"] = os.path.join(out_dir, "manifest.json")
     paths["label_coverage"] = os.path.join(out_dir, "label_coverage.csv")
     return paths

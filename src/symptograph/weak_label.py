@@ -42,6 +42,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from .jsonio import write_json
 from .preprocess import Ontology
 
 DEFAULT_MODELS = {
@@ -508,7 +509,6 @@ def save_weak_labels(weak: pd.DataFrame, sample: pd.DataFrame, out_dir: str,
         ],
     }
     m = os.path.join(out_dir, "weak_label_manifest.json")
-    with open(m, "w", encoding="utf-8") as fh:
-        json.dump(manifest, fh, indent=2, default=str)
+    write_json(m, manifest)
     paths["manifest"] = m
     return paths
