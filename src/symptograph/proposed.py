@@ -122,6 +122,10 @@ class ProposedConfig:
         return ProposedConfig(**{**asdict(self), **flags})
 
 
+# Bump when the module layout changes, so stale checkpoints are refused rather
+# than silently loaded into a different network.
+ARCH_VERSION = 2
+
 ARCH_FIELDS = ("max_length", "encoder_name", "encoder_fallback", "graph_dim",
                "graph_layers", "use_bottleneck", "use_graph", "use_uncertainty",
                "use_contrastive", "dropout")
@@ -129,6 +133,7 @@ ARCH_FIELDS = ("max_length", "encoder_name", "encoder_fallback", "graph_dim",
 
 def architecture_fingerprint(rung: str, cfg: ProposedConfig, onto: Ontology) -> tuple:
     fields = {"rung": rung, "n_symptoms": len(onto.symptoms),
+              "arch_version": ARCH_VERSION,
               **{f: getattr(cfg, f) for f in ARCH_FIELDS}}
     blob = json.dumps(fields, sort_keys=True, default=str).encode()
     return hashlib.md5(blob).hexdigest()[:12], fields
@@ -254,10 +259,19 @@ def make_collate(tokenizer, max_length: int):
 # model
 # --------------------------------------------------------------------------- #
 def normalise_adjacency(A):
-    """Symmetric normalisation of A + I."""
+    """Symmetric normalisation of ``relu(A) + I``.
+
+    The ReLU is load-bearing, not cosmetic. ``A = A0 + dA`` has a learnable
+    ``dA``, and once it goes negative the row sums can cross zero. Normalising by
+    ``deg.clamp(min=1e-9) ** -0.5`` then multiplies the adjacency by up to 3e4,
+    which drove training losses to 1e13 in the graph rungs. Keeping edges
+    non-negative guarantees ``deg >= 1`` after adding the identity, so the
+    normaliser is bounded by 1.
+    """
     import torch
+    A = torch.relu(A)
     A = A + torch.eye(A.shape[0], device=A.device, dtype=A.dtype)
-    deg = A.sum(-1).clamp(min=1e-9)
+    deg = A.sum(-1).clamp(min=1.0)
     d = deg.pow(-0.5)
     return d.unsqueeze(1) * A * d.unsqueeze(0)
 
@@ -348,6 +362,10 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
                 self.dis_node = nn.Parameter(torch.randn(Dn, gd) * 0.02)
                 self.gnn = nn.ModuleList(
                     [nn.Linear(gd, gd) for _ in range(cfg.graph_layers)])
+                # normalise after each residual step so repeated propagation
+                # cannot amplify activations layer over layer
+                self.gnn_norm = nn.ModuleList(
+                    [nn.LayerNorm(gd) for _ in range(cfg.graph_layers)])
                 self.graph_refine = nn.Linear(gd, 1)
                 self.graph_pool = nn.Linear(gd * 2, gd)
                 head_dim = K + gd
@@ -407,8 +425,9 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
                     Xd = self.dis_node.unsqueeze(0).expand(B, -1, -1)
                     X = torch.cat([Xs, Xd], dim=1)
                     A = self.adjacency()
-                    for layer in self.gnn:
-                        X = torch.relu(layer(torch.einsum("ij,bjd->bid", A, X))) + X
+                    for layer, norm in zip(self.gnn, self.gnn_norm):
+                        X = norm(torch.relu(
+                            layer(torch.einsum("ij,bjd->bid", A, X))) + X)
                     k = self.sym_node.shape[0]
                     c_logit = c_logit + self.graph_refine(X[:, :k]).squeeze(-1)
                     graph_rep = self.graph_pool(
