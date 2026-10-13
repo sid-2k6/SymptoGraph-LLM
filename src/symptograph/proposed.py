@@ -40,6 +40,7 @@ from .metrics import (aggregate_seeds, compute_metrics, flatten_metrics,
                       plot_risk_coverage, plot_seed_aggregate, selective_metrics,
                       set_publication_style)
 from .preprocess import Ontology
+from .rng import capture_rng_state, restore_rng_state
 
 N_SEVERITY, N_RISK = 4, 5
 
@@ -731,9 +732,7 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
             scaler.load_state_dict(ck["scaler"])
         start_epoch = ck["epoch"] + 1
         best_score, best_epoch = ck.get("best_score", -math.inf), ck.get("best_epoch")
-        random.setstate(ck["rng"]["python"])
-        np.random.set_state(ck["rng"]["numpy"])
-        torch.set_rng_state(ck["rng"]["torch"])
+        restore_rng_state(ck.get("rng"))
         if verbose:
             print(f"  resumed after epoch {ck['epoch']} "
                   f"(best {cfg.selection_metric}={best_score:.4f} @ epoch {best_epoch})")
@@ -801,9 +800,7 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
                         "epoch": epoch, "best_score": best_score,
                         "best_epoch": best_epoch, "fingerprint": fingerprint,
                         "fingerprint_fields": arch_fields,
-                        "rng": {"python": random.getstate(),
-                                "numpy": np.random.get_state(),
-                                "torch": torch.get_rng_state()}}, last_ckpt)
+                        "rng": capture_rng_state()}, last_ckpt)
 
         epoch_times.append(secs)
         if verbose:
