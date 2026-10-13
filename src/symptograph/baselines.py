@@ -42,6 +42,7 @@ from .metrics import (aggregate_seeds, compute_metrics, flatten_metrics,
                       headline_table, plot_history, plot_per_symptom_bars,
                       plot_seed_aggregate)
 from .preprocess import Ontology
+from .rng import capture_rng_state, restore_rng_state
 
 BASELINES = ("tfidf_mlp", "bilstm_attn", "mentalroberta")
 N_SEVERITY, N_RISK = 4, 5
@@ -516,9 +517,7 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
             scaler.load_state_dict(ck["scaler"])
         start_epoch = ck["epoch"] + 1
         best_score, best_epoch = ck.get("best_score", -math.inf), ck.get("best_epoch")
-        random.setstate(ck["rng"]["python"])
-        np.random.set_state(ck["rng"]["numpy"])
-        torch.set_rng_state(ck["rng"]["torch"])
+        restore_rng_state(ck.get("rng"))
         if verbose:
             print(f"  resumed from epoch {ck['epoch']} "
                   f"(best {cfg.selection_metric}={best_score:.4f} @ {best_epoch})")
@@ -569,8 +568,7 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
                     "scaler": scaler.state_dict() if scaler else None,
                     "epoch": epoch, "best_score": best_score, "best_epoch": best_epoch,
                     "fingerprint": fingerprint, "fingerprint_fields": arch_fields,
-                    "rng": {"python": random.getstate(), "numpy": np.random.get_state(),
-                            "torch": torch.get_rng_state()}}, last_ckpt)
+                    "rng": capture_rng_state()}, last_ckpt)
 
         if verbose:
             print(f"  epoch {epoch:>2}/{cfg.epochs}  loss {train_loss:.4f}/{val_loss:.4f}"
