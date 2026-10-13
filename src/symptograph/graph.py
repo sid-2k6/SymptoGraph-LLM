@@ -30,6 +30,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from .jsonio import write_json
 from .preprocess import Ontology
 
 PRIOR_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "configs", "dsm5_prior.json")
@@ -67,12 +68,10 @@ class SymptomGraph:
         np.savez_compressed(npz, **arrays)
 
         meta = os.path.join(out_dir, "graph_nodes.json")
-        with open(meta, "w", encoding="utf-8") as fh:
-            json.dump({"symptoms": self.symptoms, "disorders": self.disorders,
-                       "nodes": self.nodes, "feature_model": self.feature_model,
-                       "feature_dim": None if self.node_features is None
-                                      else int(self.node_features.shape[1])},
-                      fh, indent=2)
+        write_json(meta, {"symptoms": self.symptoms, "disorders": self.disorders,
+                          "nodes": self.nodes, "feature_model": self.feature_model,
+                          "feature_dim": None if self.node_features is None
+                                         else int(self.node_features.shape[1])})
         return {"graph": npz, "nodes": meta}
 
     @classmethod
@@ -372,7 +371,6 @@ def build(processed_dir: str, out_dir: str, min_support: int = 10,
         "disorder_cooccurrence": dd_meta,
         "node_feature_model": feat_model,
     }
-    with open(os.path.join(out_dir, "graph_stats.json"), "w", encoding="utf-8") as fh:
-        json.dump(stats, fh, indent=2, default=str)
+    write_json(os.path.join(out_dir, "graph_stats.json"), stats)
     paths["stats"] = os.path.join(out_dir, "graph_stats.json")
     return graph, paths, stats
