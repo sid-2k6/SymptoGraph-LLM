@@ -102,6 +102,9 @@ class ProposedConfig:
     limit_train: int | None = None
     limit_eval: int | None = None
     amp: bool = True
+    # "auto" uses bfloat16 where the GPU supports it (L4, A100), which is more
+    # numerically stable than fp16 and needs no gradient scaler.
+    amp_dtype: str = "auto"
     selection_metric: str = "composite"
     # Full fp32 state including optimiser, so a resumed run is numerically faithful.
     save_optimizer_state: bool = True
@@ -123,6 +126,19 @@ def architecture_fingerprint(rung: str, cfg: ProposedConfig, onto: Ontology) -> 
               **{f: getattr(cfg, f) for f in ARCH_FIELDS}}
     blob = json.dumps(fields, sort_keys=True, default=str).encode()
     return hashlib.md5(blob).hexdigest()[:12], fields
+
+
+def resolve_amp(cfg: "ProposedConfig", device: str):
+    """Return ``(autocast_dtype, scaler)``; bfloat16 needs no scaler."""
+    import torch
+    if not cfg.amp or device != "cuda":
+        return None, None
+    want = cfg.amp_dtype
+    if want == "auto":
+        want = "bf16" if torch.cuda.is_bf16_supported() else "fp16"
+    if want == "bf16":
+        return torch.bfloat16, None
+    return torch.float16, torch.amp.GradScaler("cuda")
 
 
 def set_seed(seed: int) -> None:
@@ -467,7 +483,7 @@ def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig):
 # epoch
 # --------------------------------------------------------------------------- #
 def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=None,
-              device="cpu", train: bool = True):
+              device="cpu", train: bool = True, amp_dtype=None):
     import torch
 
     model.train() if train else model.eval()
@@ -479,8 +495,8 @@ def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=N
     for batch in loader:
         batch = {k: (v.to(device) if hasattr(v, "to") else v) for k, v in batch.items()}
         with torch.set_grad_enabled(train):
-            if scaler is not None and train:
-                with torch.autocast(device_type="cuda", dtype=torch.float16):
+            if amp_dtype is not None:
+                with torch.autocast(device_type="cuda", dtype=amp_dtype):
                     out = model(batch)
                     loss, _ = compute_loss(out, batch, model, cfg)
             else:
@@ -530,7 +546,8 @@ def _f(v) -> str:
     return " n/a " if v is None else f"{v:.3f}"
 
 
-def _print_epoch(epoch, epochs, tr_loss, tr, va_loss, va, secs, best: bool):
+def _print_epoch(epoch, epochs, tr_loss, tr, va_loss, va, secs, best: bool,
+                 remaining: float | None = None):
     """Both train and validation, every epoch."""
     def line(tag, loss, b):
         return (f"  {tag:<6} loss {loss:7.4f}  symF1 {_f(b['groups']['all']['macro_f1'])}"
@@ -538,7 +555,9 @@ def _print_epoch(epoch, epochs, tr_loss, tr, va_loss, va, secs, best: bool):
                 f"  sevQWK {_f(b['tasks']['severity_depression']['qwk'])}"
                 f"  riskQWK {_f(b['tasks']['severity_risk']['qwk'])}"
                 f"  comp {_f(b['composite'])}")
-    print(f"epoch {epoch:>2}/{epochs}  [{secs:.0f}s]{'  *best' if best else ''}")
+    eta = f"  eta {remaining / 60:.0f}m" if remaining else ""
+    print(f"epoch {epoch:>2}/{epochs}  [{secs:.0f}s]{eta}"
+          f"{'  *best' if best else ''}")
     print(line("train", tr_loss, tr))
     print(line("val", va_loss, va), flush=True)
 
@@ -599,7 +618,10 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
     steps = max(len(loaders["train"]), 1) * cfg.epochs
     scheduler = get_linear_schedule_with_warmup(
         optimizer, int(cfg.warmup_ratio * steps), steps)
-    scaler = torch.amp.GradScaler("cuda") if (cfg.amp and device == "cuda") else None
+    amp_dtype, scaler = resolve_amp(cfg, device)
+    if verbose and amp_dtype is not None:
+        print(f"  autocast: {str(amp_dtype).replace('torch.', '')}"
+              f"{' with grad scaler' if scaler else ''}")
 
     fingerprint, arch_fields = architecture_fingerprint(rung, cfg, onto)
     start_epoch, best_score, best_epoch = 1, -math.inf, None
@@ -642,12 +664,16 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
     if verbose and start_epoch > cfg.epochs:
         print(f"  all {cfg.epochs} epochs already done; re-evaluating best checkpoint")
 
+    best_train_bundle = None
+    epoch_times = []
     for epoch in range(start_epoch, cfg.epochs + 1):
         t0 = time.time()
         tr_loss, tr_bundle, _ = run_epoch(model, loaders["train"], cfg, onto,
-                                          optimizer, scheduler, scaler, device, True)
+                                          optimizer, scheduler, scaler, device, True,
+                                          amp_dtype=amp_dtype)
         va_loss, va_bundle, va_sel = run_epoch(model, loaders["val"], cfg, onto,
-                                               device=device, train=False)
+                                               device=device, train=False,
+                                               amp_dtype=amp_dtype)
         score = va_bundle.get(cfg.selection_metric)
         score = -math.inf if score is None else score
         improved = score > best_score
@@ -669,6 +695,11 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
 
         if improved:
             best_score, best_epoch = score, epoch
+            # keep this epoch's train metrics so no extra train pass is needed later
+            best_train_bundle = tr_bundle
+            with open(os.path.join(out_dir, "best_train_metrics.json"), "w",
+                      encoding="utf-8") as fh:
+                json.dump(tr_bundle, fh, default=str)
             torch.save({"model": model.state_dict(), "epoch": epoch,
                         "best_score": best_score, "best_epoch": best_epoch,
                         "rung": rung, "seed": seed, "fingerprint": fingerprint,
@@ -686,22 +717,38 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
                                 "numpy": np.random.get_state(),
                                 "torch": torch.get_rng_state()}}, last_ckpt)
 
+        epoch_times.append(secs)
         if verbose:
+            remaining = (cfg.epochs - epoch) * (sum(epoch_times) / len(epoch_times))
             _print_epoch(epoch, cfg.epochs, tr_loss, tr_bundle, va_loss, va_bundle,
-                         secs, improved)
+                         secs, improved, remaining)
 
     history = pd.read_csv(history_path)
     if os.path.isfile(best_ckpt):
         ck = torch.load(best_ckpt, map_location=device, weights_only=False)
         model.load_state_dict(ck["model"])
 
+    # Only val and test need a fresh pass from the best checkpoint. Train metrics
+    # are reused from the best epoch, which saves a full pass over the training
+    # set per seed - the single largest saving on a time-limited GPU.
     finals, selectives = {}, {}
-    for split in ("train", "val", "test"):
+    for split in ("val", "test"):
         _, bundle, sel = run_epoch(model, loaders[split], cfg, onto,
-                                   device=device, train=False)
+                                   device=device, train=False, amp_dtype=amp_dtype)
         finals[split] = bundle
         if sel:
             selectives[split] = sel
+
+    if best_train_bundle is None:
+        cached = os.path.join(out_dir, "best_train_metrics.json")
+        if os.path.isfile(cached):
+            with open(cached, encoding="utf-8") as fh:
+                best_train_bundle = json.load(fh)
+    if best_train_bundle is None:
+        _, best_train_bundle, _ = run_epoch(model, loaders["train"], cfg, onto,
+                                            device=device, train=False,
+                                            amp_dtype=amp_dtype)
+    finals["train"] = best_train_bundle
 
     payload = {
         "rung": rung, "seed": seed, "encoder": model.loaded_name,
