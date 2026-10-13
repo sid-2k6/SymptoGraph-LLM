@@ -124,7 +124,7 @@ class ProposedConfig:
 
 # Bump when the module layout changes, so stale checkpoints are refused rather
 # than silently loaded into a different network.
-ARCH_VERSION = 2
+ARCH_VERSION = 3
 
 ARCH_FIELDS = ("max_length", "encoder_name", "encoder_fallback", "graph_dim",
                "graph_layers", "use_bottleneck", "use_graph", "use_uncertainty",
@@ -331,8 +331,12 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
 
             # ---- N1: clinical concept bottleneck
             self.sym_query = nn.Parameter(torch.randn(K, D) * 0.02)
-            self.sym_proj = nn.Linear(D, 1)        # shared scorer over pooled evidence
-            self.sym_scale = nn.Parameter(torch.ones(K))
+            # One scoring vector PER SYMPTOM. A single shared Linear(D, 1) here
+            # would leave each symptom only a scalar rescale of one shared
+            # direction, which is not a concept bottleneck at all - it collapsed
+            # every bottleneck rung to F1 = 0 while the flat baseline, which has
+            # K independent vectors, still learned.
+            self.sym_w = nn.Parameter(torch.randn(K, D) / math.sqrt(D))
             self.sym_bias = nn.Parameter(torch.zeros(K))
 
             # initialise the queries from the sentence embeddings of the symptom
@@ -414,8 +418,8 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
                 scores = scores.masked_fill(~mask.bool().unsqueeze(-1), float("-inf"))
                 att = torch.softmax(scores, dim=1)                 # B,L,K
                 Z = torch.einsum("blk,bld->bkd", att, H)           # B,K,D
-                c_logit = (self.sym_proj(self.drop(Z)).squeeze(-1)
-                           * self.sym_scale + self.sym_bias)        # B,K
+                c_logit = ((self.drop(Z) * self.sym_w.unsqueeze(0)).sum(-1)
+                           + self.sym_bias)                          # B,K
                 out["attention"] = att
 
                 if self.use_graph:
