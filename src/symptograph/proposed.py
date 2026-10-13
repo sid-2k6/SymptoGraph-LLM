@@ -78,6 +78,12 @@ class ProposedConfig:
     seeds: tuple = (0, 1, 2)
     encoder_name: str = "mental/mental-roberta-base"
     encoder_fallback: str = "roberta-base"
+    # A silent encoder substitution would mean reporting RoBERTa numbers as
+    # MentalRoBERTa. Set True for any run whose results you intend to publish.
+    strict_encoder: bool = False
+    # Build a small randomly initialised RoBERTa instead of downloading one.
+    # Used by the quick test so it never depends on a third-party tiny model.
+    tiny_random_encoder: bool = False
 
     # component switches, set per ladder rung
     use_bottleneck: bool = True
@@ -263,16 +269,39 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
 
     K = len(onto.symptoms)
 
-    name = cfg.encoder_name
-    try:
-        tokenizer = AutoTokenizer.from_pretrained(name)
-        encoder = AutoModel.from_pretrained(name)
-    except Exception as exc:
-        print(f"  could not load {name} ({type(exc).__name__}); "
-              f"using {cfg.encoder_fallback}")
-        name = cfg.encoder_fallback
-        tokenizer = AutoTokenizer.from_pretrained(name)
-        encoder = AutoModel.from_pretrained(name)
+    fallback_used = False
+    if cfg.tiny_random_encoder:
+        from transformers import AutoConfig
+        tokenizer = AutoTokenizer.from_pretrained(cfg.encoder_fallback)
+        conf = AutoConfig.from_pretrained(cfg.encoder_fallback)
+        conf.num_hidden_layers, conf.hidden_size = 2, 128
+        conf.num_attention_heads, conf.intermediate_size = 2, 256
+        encoder = AutoModel.from_config(conf)
+        name = "tiny-random (untrained)"
+    else:
+        name = cfg.encoder_name
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(name)
+            encoder = AutoModel.from_pretrained(name)
+        except Exception as exc:
+            if cfg.strict_encoder:
+                raise RuntimeError(
+                    f"Could not load the requested encoder {name!r}: "
+                    f"{type(exc).__name__}: {exc}\n\n"
+                    f"strict_encoder=True, so this will not silently fall back to "
+                    f"{cfg.encoder_fallback!r}. Reporting one encoder's results "
+                    f"under another model's name would invalidate the comparison.\n"
+                    f"Fix the model id or network, or set strict_encoder=False."
+                ) from exc
+            print("  " + "!" * 68)
+            print(f"  WARNING: could not load {name} ({type(exc).__name__}).")
+            print(f"  FALLING BACK to {cfg.encoder_fallback}. Results will NOT be "
+                  f"MentalRoBERTa results.")
+            print("  " + "!" * 68, flush=True)
+            fallback_used = True
+            name = cfg.encoder_fallback
+            tokenizer = AutoTokenizer.from_pretrained(name)
+            encoder = AutoModel.from_pretrained(name)
 
     class SymptoGraphLLM(nn.Module):
         def __init__(self):
@@ -280,6 +309,8 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
             self.cfg = cfg
             self.encoder = encoder
             self.loaded_name = name
+            self.encoder_requested = cfg.encoder_name
+            self.encoder_fallback_used = fallback_used
             D = encoder.config.hidden_size
             self.hidden = D
             self.drop = nn.Dropout(cfg.dropout)
@@ -655,6 +686,8 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
     with open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8") as fh:
         json.dump({"rung": rung, "seed": seed, "device": device,
                    "encoder": model.loaded_name,
+                   "encoder_requested": model.encoder_requested,
+                   "encoder_fallback_used": model.encoder_fallback_used,
                    "architecture_fingerprint": fingerprint,
                    "n_weak_rows": frames["train"]["n_weak_rows"],
                    "trainable_parameters": sum(p.numel() for p in model.parameters()
@@ -752,6 +785,8 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
 
     payload = {
         "rung": rung, "seed": seed, "encoder": model.loaded_name,
+        "encoder_requested": model.encoder_requested,
+        "encoder_fallback_used": model.encoder_fallback_used,
         "selection_metric": cfg.selection_metric,
         "best_epoch": best_epoch,
         "best_val_score": None if best_score == -math.inf else best_score,
@@ -803,6 +838,8 @@ def run_rung(rung: str, flags: dict, cfg: ProposedConfig, processed_dir: str,
     payload = {"rung": rung, "components": runs[0]["components"],
                "seeds": list(rung_cfg.seeds), "n_seeds": len(runs),
                "encoder": runs[0]["encoder"],
+               "encoder_fallback_used": any(r.get("encoder_fallback_used")
+                                            for r in runs),
                "per_seed_best_epoch": {str(r["seed"]): r["best_epoch"] for r in runs},
                "aggregate": aggregates["val"], "aggregate_by_split": aggregates,
                "config": asdict(rung_cfg)}
