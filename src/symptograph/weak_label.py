@@ -313,19 +313,44 @@ def run_labelling(df: pd.DataFrame, labeller, symptoms: list[str], out_jsonl: st
     onto = onto or Ontology.load()
     os.makedirs(os.path.dirname(out_jsonl) or ".", exist_ok=True)
 
+    # Resume must be keyed on (post_id, labeller), not post_id alone. Keyed on
+    # post_id only, switching from the mock labeller to a real LLM found nothing
+    # left to do and silently kept the mock labels.
+    current = getattr(labeller, "name", "unknown")
     done: set[str] = set()
+    other_labellers: dict[str, int] = {}
     if os.path.exists(out_jsonl):
         with open(out_jsonl, encoding="utf-8") as fh:
             for line in fh:
                 try:
-                    done.add(json.loads(line)["post_id"])
-                except (json.JSONDecodeError, KeyError):
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
                     continue
+                who = rec.get("labeller", "unknown")
+                if who == current:
+                    done.add(rec.get("post_id"))
+                else:
+                    other_labellers[who] = other_labellers.get(who, 0) + 1
+
+    if other_labellers and not done:
+        # the whole log came from a different labeller: archive and start clean
+        tag = "_".join(sorted(other_labellers)).replace("/", "_")[:40]
+        backup = f"{out_jsonl}.{tag}.bak"
+        os.replace(out_jsonl, backup)
+        if verbose:
+            print(f"  existing log was written by {sorted(other_labellers)}, "
+                  f"not {current!r}.")
+            print(f"  archived to {os.path.basename(backup)} and starting fresh.")
+    elif other_labellers and verbose:
+        print(f"  note: {sum(other_labellers.values()):,} rows from "
+              f"{sorted(other_labellers)} will be re-labelled by {current!r}")
+
     todo = df[~df["post_id"].isin(done)].reset_index(drop=True)
-    stats = {"already_done": len(done), "to_label": len(todo),
+    stats = {"already_done": len(done), "to_label": len(todo), "labeller": current,
+             "superseded_rows": sum(other_labellers.values()),
              "labelled": 0, "parse_failures": 0, "retried": 0}
     if verbose:
-        print(f"{len(done):,} already labelled, {len(todo):,} to go")
+        print(f"{len(done):,} already labelled by {current!r}, {len(todo):,} to go")
     if todo.empty:
         return stats
 

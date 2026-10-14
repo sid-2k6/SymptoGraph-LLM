@@ -179,6 +179,42 @@ upward.
 **Fix:** `load_frames` raises if the parquet's `labeller` column contains `mock`,
 unless `allow_mock_weak_labels=True`.
 
+### 3.9 Ordinal class weights — the single largest measured gain
+
+Depression severity is 72% `minimum` (1767 / 205 / 288 / 196) and risk is
+similarly skewed. Unweighted cross-entropy made both heads predict the majority
+class, so QWK sat at exactly 0.000 in nearly every run — which also dragged
+`composite` down, since QWK is one of its three terms.
+
+**Fix:** inverse-frequency class weights, capped at 10, for both ordinal heads
+(`proposed.class_weights`). Severity weights become `[0.35, 3.00, 2.13, 3.13]`.
+
+**Measured** (`L1_bottleneck`, BERT-mini, 2,000 rows, 3 epochs, validation):
+
+| setting | severity QWK | severity MAE | severity macro-F1 | selection score |
+|---|---|---|---|---|
+| unweighted | +0.005 | 0.428 | 0.219 | 0.426 |
+| class-weighted | **+0.509** | 0.386 | 0.294 | **0.587** |
+
+This is a real modelling fix rather than a calibration trick: the head was
+degenerate before and is now discriminative. Risk QWK stayed at 0.000 in this
+test because the subset held only ~50 risk rows; at full scale it has 340.
+
+### 3.10 Weak-label resume was not labeller-aware
+
+`run_labelling` resumed on `post_id` alone while already recording a `labeller`
+field per row. Re-running notebook 04 with `MOCK = False` therefore found every
+post "already done" and silently kept the mock labels. The user hit exactly this:
+the mock guard still fired after a real re-run.
+
+**Fix:** resume is keyed on `(post_id, labeller)`. A log written entirely by a
+different labeller is archived to `<name>.<labeller>.bak` and labelling starts
+fresh; a mixed log re-labels the foreign rows and reports how many. The chosen
+labeller is recorded in `run_stats`.
+
+**Verified:** mock → mock resumes correctly (55 done, 0 to go); mock → real
+archives the old log and relabels all 55, after which the mock guard passes.
+
 ## 4. Infrastructure fixes (no effect on model behaviour)
 
 | Issue | Cause | Fix |
@@ -208,8 +244,12 @@ Two things could legitimately change this, in order of expected effect:
 
 1. **Real weak labels** (§3.8). N3, and the contrastive objective that consumes
    symptom profiles, were both running on noise.
-2. **The calibration and capacity fixes** (§3.3, §3.5), which are measured to
-   help substantially in small-scale tests but have not been run at full scale.
+2. **Ordinal class weights** (§3.9), which moved severity QWK from 0.005 to
+   0.509 in a small-scale test. Since severity QWK is one of three terms in both
+   `composite` and `selection_score`, this lifts every rung and makes the
+   severity task actually informative for the first time.
+3. **The calibration and capacity fixes** (§3.3, §3.5), measured to help
+   substantially in small-scale tests but not yet run at full scale.
 
 What must **not** happen: tuning hyperparameters per rung until `L5_full` wins.
 Every setting in §3 is shared by all six rungs, which is the only thing that
