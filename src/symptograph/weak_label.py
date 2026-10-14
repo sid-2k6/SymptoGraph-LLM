@@ -29,13 +29,19 @@ measured on them directly. Two things close that gap:
    the weak-only symptoms directly.
 
 Everything here is resumable. Progress is appended to JSONL after each batch, so
-a disconnected session loses at most one batch.
+a disconnected session loses at most one batch -- *provided the JSONL survives
+the session*. On Colab, ``/content`` is wiped when the runtime is recycled, so
+``run_labelling`` takes a ``mirror_to`` path and copies the log to Drive every
+``mirror_every`` batches. Appending directly to a Drive FUSE file would instead
+re-upload the whole file on every flush, which gets slow once the log is tens of
+megabytes, so the local file stays the write target and Drive gets a snapshot.
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import shutil
 import time
 from dataclasses import dataclass
 
@@ -305,13 +311,108 @@ class VLLMLabeller:
 # --------------------------------------------------------------------------- #
 # labelling loop
 # --------------------------------------------------------------------------- #
+def _count_lines(path: str) -> int:
+    if not path or not os.path.exists(path):
+        return 0
+    with open(path, "rb") as fh:
+        return sum(1 for _ in fh)
+
+
+def mirror_file(src: str, dst: str) -> str | None:
+    """Snapshot ``src`` onto ``dst`` atomically; returns ``dst`` on success.
+
+    Used to push the append-only label log onto Drive while the run is still
+    going. Writes a sibling temp file and renames over the target, so a session
+    that dies mid-copy leaves the previous complete snapshot in place rather
+    than a truncated one. Never raises: losing a mirror must not kill a run that
+    has hours of GPU time in it.
+    """
+    if not dst or not os.path.exists(src):
+        return None
+    try:
+        os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
+        tmp = f"{dst}.partial"
+        shutil.copyfile(src, tmp)
+        os.replace(tmp, dst)
+        return dst
+    except OSError as exc:            # Drive hiccup, quota, disconnect
+        print(f"  warning: could not mirror to {dst}: {exc}", flush=True)
+        return None
+
+
+def _label_loop(todo: pd.DataFrame, labeller, symptoms: list[str], out_jsonl: str,
+                onto: Ontology, batch_size: int, max_retries: int, verbose: bool,
+                report_every: int, mirror_to: str | None, mirror_every: int,
+                stats: dict, t0: float) -> None:
+    """The batch loop itself. Split out so the caller can mirror in a ``finally``."""
+    with open(out_jsonl, "a", encoding="utf-8") as sink:
+        for start in range(0, len(todo), batch_size):
+            batch = todo.iloc[start:start + batch_size]
+            prompts = [build_prompt(t, symptoms, onto) for t in batch["text"]]
+            raws = labeller.generate(prompts, symptoms)
+            parsed = [parse_response(r, symptoms) for r in raws]
+
+            for _attempt in range(max_retries):
+                bad = [i for i, p in enumerate(parsed) if p is None]
+                if not bad:
+                    break
+                stats["retried"] += len(bad)
+                retry = labeller.generate([prompts[i] for i in bad], symptoms)
+                for i, r in zip(bad, retry):
+                    parsed[i] = parse_response(r, symptoms)
+
+            for (_, row), result in zip(batch.iterrows(), parsed):
+                if result is None:
+                    stats["parse_failures"] += 1
+                    continue
+                sink.write(json.dumps({
+                    "post_id": row["post_id"],
+                    "labels": {s: result[s][0] for s in symptoms},
+                    "confidence": {s: result[s][1] for s in symptoms},
+                    "labeller": getattr(labeller, "name", "unknown"),
+                }) + "\n")
+                stats["labelled"] += 1
+            sink.flush()
+            os.fsync(sink.fileno())
+
+            batch_no = start // batch_size
+            if mirror_to and batch_no and batch_no % mirror_every == 0:
+                mirror_file(out_jsonl, mirror_to)
+                stats["mirrors"] = stats.get("mirrors", 0) + 1
+
+            if verbose and batch_no % report_every == 0:
+                seen = start + len(batch)
+                rate = seen / max(time.time() - t0, 1e-6)
+                left = (len(todo) - seen) / max(rate, 1e-6)
+                print(f"  {seen:>7,}/{len(todo):,}  {rate:5.1f} posts/s  "
+                      f"eta {left / 60:5.1f} min", flush=True)
+
+
 def run_labelling(df: pd.DataFrame, labeller, symptoms: list[str], out_jsonl: str,
                   onto: Ontology | None = None, batch_size: int = 32,
                   max_retries: int = 1, verbose: bool = True,
-                  report_every: int = 10) -> dict:
-    """Label ``df`` in batches, appending to ``out_jsonl`` so runs are resumable."""
+                  report_every: int = 10, mirror_to: str | None = None,
+                  mirror_every: int = 20) -> dict:
+    """Label ``df`` in batches, appending to ``out_jsonl`` so runs are resumable.
+
+    ``mirror_to`` is a durable copy of the log (a Drive path on Colab), refreshed
+    every ``mirror_every`` batches. Without it, a recycled runtime takes the
+    whole log with it and the next session restarts from zero.
+    """
     onto = onto or Ontology.load()
     os.makedirs(os.path.dirname(out_jsonl) or ".", exist_ok=True)
+
+    # A mirror that is ahead of the local log means the previous session died
+    # after a snapshot was taken but before the local file was copied back
+    # (or the local file is simply gone). Recover from it before computing resume.
+    if mirror_to and os.path.exists(mirror_to):
+        local_lines = _count_lines(out_jsonl)
+        mirror_lines = _count_lines(mirror_to)
+        if mirror_lines > local_lines:
+            if verbose:
+                print(f"  recovering {mirror_lines:,} rows from {mirror_to} "
+                      f"(local log had {local_lines:,})")
+            mirror_file(mirror_to, out_jsonl)
 
     # Resume must be keyed on (post_id, labeller), not post_id alone. Keyed on
     # post_id only, switching from the mock labeller to a real LLM found nothing
@@ -355,41 +456,15 @@ def run_labelling(df: pd.DataFrame, labeller, symptoms: list[str], out_jsonl: st
         return stats
 
     t0 = time.time()
-    with open(out_jsonl, "a", encoding="utf-8") as sink:
-        for start in range(0, len(todo), batch_size):
-            batch = todo.iloc[start:start + batch_size]
-            prompts = [build_prompt(t, symptoms, onto) for t in batch["text"]]
-            raws = labeller.generate(prompts, symptoms)
-            parsed = [parse_response(r, symptoms) for r in raws]
-
-            for attempt in range(max_retries):
-                bad = [i for i, p in enumerate(parsed) if p is None]
-                if not bad:
-                    break
-                stats["retried"] += len(bad)
-                retry = labeller.generate([prompts[i] for i in bad], symptoms)
-                for i, r in zip(bad, retry):
-                    parsed[i] = parse_response(r, symptoms)
-
-            for (_, row), result in zip(batch.iterrows(), parsed):
-                if result is None:
-                    stats["parse_failures"] += 1
-                    continue
-                sink.write(json.dumps({
-                    "post_id": row["post_id"],
-                    "labels": {s: result[s][0] for s in symptoms},
-                    "confidence": {s: result[s][1] for s in symptoms},
-                    "labeller": getattr(labeller, "name", "unknown"),
-                }) + "\n")
-                stats["labelled"] += 1
-            sink.flush()
-
-            if verbose and (start // batch_size) % report_every == 0:
-                seen = start + len(batch)
-                rate = seen / max(time.time() - t0, 1e-6)
-                left = (len(todo) - seen) / max(rate, 1e-6)
-                print(f"  {seen:>7,}/{len(todo):,}  {rate:5.1f} posts/s  "
-                      f"eta {left / 60:5.1f} min", flush=True)
+    try:
+        _label_loop(todo, labeller, symptoms, out_jsonl, onto, batch_size,
+                    max_retries, verbose, report_every, mirror_to, mirror_every,
+                    stats, t0)
+    finally:
+        # also runs on KeyboardInterrupt and on a dying runtime's SIGTERM, so an
+        # interrupted run still leaves a complete snapshot on Drive.
+        if mirror_to:
+            mirror_file(out_jsonl, mirror_to)
 
     stats["elapsed_s"] = round(time.time() - t0, 1)
     stats["posts_per_second"] = round(stats["labelled"] / max(stats["elapsed_s"], 1e-6), 2)
