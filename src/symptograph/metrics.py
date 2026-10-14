@@ -22,7 +22,27 @@ import pandas as pd
 
 from .jsonio import read_json
 
-SELECTION_METRIC = "composite"
+SELECTION_METRIC = "selection_score"
+
+
+def positive_weights(labels: np.ndarray, cap: float = 10.0) -> np.ndarray:
+    """Per-symptom BCE positive weight, n_neg / n_pos, capped.
+
+    Several symptoms are strongly imbalanced (concentration_problems is 19%
+    positive, low_self_esteem 23%). Unweighted BCE lets the model win by
+    predicting "absent" everywhere, which is why symptom F1 sat near zero while
+    the loss still looked healthy.
+    """
+    w = np.ones(labels.shape[1], dtype=np.float32)
+    for k in range(labels.shape[1]):
+        m = labels[:, k] >= 0
+        if not m.any():
+            continue
+        pos = float((labels[m, k] == 1).sum())
+        neg = float((labels[m, k] == 0).sum())
+        if pos > 0:
+            w[k] = float(np.clip(neg / pos, 1.0, cap))
+    return w
 
 
 # --------------------------------------------------------------------------- #
@@ -101,7 +121,35 @@ def _nanmean(values: Sequence) -> float | None:
 # --------------------------------------------------------------------------- #
 # full metric bundle
 # --------------------------------------------------------------------------- #
-def compute_metrics(preds: dict, targets: dict, onto, threshold: float = 0.5) -> dict:
+def tune_thresholds(prob: np.ndarray, y: np.ndarray, grid=None) -> np.ndarray:
+    """Per-symptom decision threshold that maximises F1 on the given split.
+
+    A fixed 0.5 cut is a poor choice for imbalanced multi-label targets: a
+    well-ranked model can score F1 = 0 simply because every probability sits
+    below 0.5. Thresholds are tuned on validation only and then applied
+    unchanged to test, and the same procedure runs for every model, so the
+    comparison stays fair.
+    """
+    from sklearn.metrics import f1_score
+    grid = np.arange(0.05, 0.96, 0.05) if grid is None else grid
+    K = prob.shape[1]
+    out = np.full(K, 0.5, dtype=np.float32)
+    for k in range(K):
+        m = y[:, k] >= 0
+        if m.sum() < 10 or len(np.unique(y[m, k])) < 2:
+            continue
+        best, best_f1 = 0.5, -1.0
+        for t in grid:
+            f1 = f1_score(y[m, k].astype(int), (prob[m, k] >= t).astype(int),
+                          zero_division=0)
+            if f1 > best_f1:
+                best, best_f1 = float(t), f1
+        out[k] = best
+    return out
+
+
+def compute_metrics(preds: dict, targets: dict, onto, threshold: float = 0.5,
+                    thresholds: np.ndarray | None = None) -> dict:
     """Build the full nested metric bundle for one split.
 
     ``preds`` holds ``symptom_prob`` (N, K), ``severity_logits`` (N, 4),
@@ -115,7 +163,9 @@ def compute_metrics(preds: dict, targets: dict, onto, threshold: float = 0.5) ->
     if prob is not None and y is not None and len(y):
         for i, s in enumerate(onto.symptoms):
             m = y[:, i] >= 0
-            out["per_symptom"][s] = binary_metrics(y[m, i].astype(int), prob[m, i], threshold)
+            thr = float(thresholds[i]) if thresholds is not None else threshold
+            out["per_symptom"][s] = binary_metrics(y[m, i].astype(int), prob[m, i], thr)
+            out["per_symptom"][s]["threshold"] = thr
     else:
         for s in onto.symptoms:
             out["per_symptom"][s] = binary_metrics(np.array([]), np.array([]))
@@ -136,8 +186,13 @@ def compute_metrics(preds: dict, targets: dict, onto, threshold: float = 0.5) ->
             sub_y, sub_p = y[:, idx], prob[:, idx]
             mask = sub_y >= 0
             if mask.any():
-                micro = _safe(f1_score, sub_y[mask].astype(int),
-                              (sub_p[mask] >= threshold).astype(int), zero_division=0)
+                if thresholds is not None:
+                    thr_mat = np.broadcast_to(thresholds[idx], sub_p.shape)
+                    pred = (sub_p >= thr_mat)[mask].astype(int)
+                else:
+                    pred = (sub_p[mask] >= threshold).astype(int)
+                micro = _safe(f1_score, sub_y[mask].astype(int), pred,
+                              zero_division=0)
         out["groups"][gname] = {
             "n_symptoms": len(rows),
             "macro_f1": _nanmean([r["f1"] for r in rows]),
@@ -167,11 +222,20 @@ def compute_metrics(preds: dict, targets: dict, onto, threshold: float = 0.5) ->
     else:
         out["tasks"]["stress"] = binary_metrics(np.array([]), np.array([]))
 
-    # ---- single number for model selection
+    # ---- summary numbers
+    # composite keeps all three tasks, for reporting.
     out["composite"] = _nanmean([
         out["groups"]["all"]["macro_f1"],
         out["tasks"]["severity_depression"]["qwk"],
         out["tasks"]["severity_risk"]["qwk"],
+    ])
+    # selection_score drops suicide-risk QWK, which has only 340 training and 74
+    # test rows and swings by +/-0.15 between seeds. Including that noise in the
+    # checkpoint-selection signal means picking epochs on luck.
+    out["selection_score"] = _nanmean([
+        out["groups"]["all"]["macro_f1"],
+        out["groups"]["all"]["macro_auroc"],
+        out["tasks"]["severity_depression"]["qwk"],
     ])
     return out
 
@@ -181,6 +245,7 @@ def flatten_metrics(bundle: dict, prefix: str = "") -> dict:
     flat: dict = {}
     p = f"{prefix}_" if prefix else ""
     flat[f"{p}composite"] = bundle.get("composite")
+    flat[f"{p}selection_score"] = bundle.get("selection_score")
     for g, vals in bundle.get("groups", {}).items():
         for k, v in vals.items():
             flat[f"{p}group_{g}_{k}"] = v
@@ -209,6 +274,7 @@ def aggregate_seeds(bundles: list[dict], onto) -> dict:
 
     agg: dict = {"per_symptom": {}, "groups": {}, "tasks": {},
                  "composite": ms([b.get("composite") for b in bundles]),
+                 "selection_score": ms([b.get("selection_score") for b in bundles]),
                  "n_seeds": len(bundles)}
     for s in onto.symptoms:
         agg["per_symptom"][s] = {
@@ -237,6 +303,7 @@ def headline_table(agg: dict, label: str = "") -> pd.DataFrame:
                          "formatted": "-" if m is None else f"{m:.3f} +/- {sd or 0:.3f}"})
 
     add("composite", agg.get("composite", {}))
+    add("selection_score", agg.get("selection_score", {}))
     for g in ("all", "gold_supervised", "weak_only"):
         if g in agg.get("groups", {}):
             add(f"symptom_macro_f1[{g}]", agg["groups"][g].get("macro_f1", {}))

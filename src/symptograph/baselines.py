@@ -40,7 +40,7 @@ import pandas as pd
 
 from .metrics import (aggregate_seeds, compute_metrics, flatten_metrics,
                       headline_table, plot_history, plot_per_symptom_bars,
-                      plot_seed_aggregate)
+                      plot_seed_aggregate, positive_weights, tune_thresholds)
 from .jsonio import write_json
 from .preprocess import Ontology
 from .rng import capture_rng_state, restore_rng_state
@@ -80,7 +80,10 @@ class TrainConfig:
     limit_train: int | None = None
     limit_eval: int | None = None
     amp: bool = True
-    selection_metric: str = "composite"
+    selection_metric: str = "selection_score"
+    pos_weight_cap: float = 10.0
+    tune_thresholds: bool = True
+    strict_encoder_note: str = "see strict_encoder"
 
     def lr_for(self, model: str) -> float:
         return self.shared_lr if self.shared_lr is not None else self.lr_by_model[model]
@@ -358,7 +361,8 @@ def build_model(name: str, cfg: TrainConfig, onto: Ontology, train_texts):
 # --------------------------------------------------------------------------- #
 # loss
 # --------------------------------------------------------------------------- #
-def multitask_loss(out: dict, batch: dict, cfg: TrainConfig) -> tuple:
+def multitask_loss(out: dict, batch: dict, cfg: TrainConfig,
+                   pos_weight=None) -> tuple:
     """Masked multi-task loss. Rows missing a target contribute nothing to it."""
     import torch
     import torch.nn.functional as F
@@ -370,8 +374,15 @@ def multitask_loss(out: dict, batch: dict, cfg: TrainConfig) -> tuple:
     y = batch["symptoms"]
     mask = y >= 0
     if mask.any():
-        l = F.binary_cross_entropy_with_logits(
-            out["symptoms"][mask], y[mask].clamp(min=0), reduction="mean")
+        target = y[mask].clamp(min=0)
+        bce = F.binary_cross_entropy_with_logits(
+            out["symptoms"][mask], target, reduction="none")
+        if pos_weight is not None:
+            pw = pos_weight.unsqueeze(0).expand_as(y)[mask]
+            wts = torch.where(target > 0.5, pw, torch.ones_like(pw))
+            l = (bce * wts).sum() / wts.sum().clamp(min=1e-6)
+        else:
+            l = bce.mean()
         total = total + cfg.task_weights["symptoms"] * l
         parts["symptoms"] = float(l.detach())
 
@@ -405,7 +416,8 @@ def _collect(preds: dict) -> dict:
 
 
 def _run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None,
-               scaler=None, device="cpu", train: bool = True):
+               scaler=None, device="cpu", train: bool = True,
+               pos_weight=None, thresholds=None):
     """One pass. Training predictions are gathered from the same forward passes,
     so train metrics cost nothing extra."""
     import torch
@@ -421,10 +433,10 @@ def _run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None,
             if scaler is not None and train:
                 with torch.autocast(device_type="cuda", dtype=torch.float16):
                     out = model(batch)
-                    loss, _ = multitask_loss(out, batch, cfg)
+                    loss, _ = multitask_loss(out, batch, cfg, pos_weight)
             else:
                 out = model(batch)
-                loss, _ = multitask_loss(out, batch, cfg)
+                loss, _ = multitask_loss(out, batch, cfg, pos_weight)
 
         if train:
             optimizer.zero_grad(set_to_none=True)
@@ -449,8 +461,9 @@ def _run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None,
 
     preds = {k: np.concatenate(v) if v else np.zeros((0,)) for k, v in buf.items()}
     targets = {k: np.concatenate(v) if v else np.zeros((0,)) for k, v in tgt.items()}
-    bundle = compute_metrics(_collect(preds), targets, onto)
-    return total_loss / max(n_batches, 1), bundle
+    bundle = compute_metrics(_collect(preds), targets, onto, thresholds=thresholds)
+    return total_loss / max(n_batches, 1), bundle, {
+        "symptom_prob": _collect(preds)["symptom_prob"], "symptoms": targets["symptoms"]}
 
 
 # --------------------------------------------------------------------------- #
@@ -498,6 +511,12 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
         optimizer, int(cfg.warmup_ratio * steps), steps)
     scaler = torch.amp.GradScaler("cuda") if (cfg.amp and device == "cuda") else None
 
+    pos_weight = None
+    if cfg.pos_weight_cap and cfg.pos_weight_cap > 1:
+        sym = targets_from_frame(frames["train"], onto)["symptoms"].astype(np.float32)
+        pos_weight = torch.tensor(positive_weights(sym, cfg.pos_weight_cap),
+                                  device=device)
+
     fingerprint, arch_fields = architecture_fingerprint(name, cfg, onto)
 
     start_epoch, best_score, best_epoch = 1, -math.inf, None
@@ -537,11 +556,12 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
 
     for epoch in range(start_epoch, cfg.epochs + 1):
         t0 = time.time()
-        train_loss, train_bundle = _run_epoch(model, loaders["train"], cfg, onto,
-                                              optimizer, scheduler, scaler, device,
-                                              train=True)
-        val_loss, val_bundle = _run_epoch(model, loaders["val"], cfg, onto,
-                                          device=device, train=False)
+        train_loss, train_bundle, _ = _run_epoch(
+            model, loaders["train"], cfg, onto, optimizer, scheduler, scaler,
+            device, train=True, pos_weight=pos_weight)
+        val_loss, val_bundle, _ = _run_epoch(
+            model, loaders["val"], cfg, onto, device=device, train=False,
+            pos_weight=pos_weight)
         score = val_bundle.get(cfg.selection_metric)
         score = -math.inf if score is None else score
 
@@ -583,12 +603,17 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
         ck = torch.load(best_ckpt, map_location=device, weights_only=False)
         _check_checkpoint_compatible(ck, fingerprint, arch_fields, best_ckpt, out_dir)
         model.load_state_dict(ck["model"])
-    _, final_train = _run_epoch(model, loaders["train"], cfg, onto,
-                                device=device, train=False)
-    _, final_val = _run_epoch(model, loaders["val"], cfg, onto,
-                              device=device, train=False)
-    _, final_test = _run_epoch(model, loaders["test"], cfg, onto,
+    thresholds = None
+    if cfg.tune_thresholds:
+        _, _, raw = _run_epoch(model, loaders["val"], cfg, onto,
                                device=device, train=False)
+        thresholds = tune_thresholds(raw["symptom_prob"], raw["symptoms"])
+    _, final_train, _ = _run_epoch(model, loaders["train"], cfg, onto,
+                                   device=device, train=False, thresholds=thresholds)
+    _, final_val, _ = _run_epoch(model, loaders["val"], cfg, onto,
+                                 device=device, train=False, thresholds=thresholds)
+    _, final_test, _ = _run_epoch(model, loaders["test"], cfg, onto,
+                                  device=device, train=False, thresholds=thresholds)
 
     payload = {
         "baseline": name, "seed": seed,
@@ -601,6 +626,8 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
         "device": device,
         "config": asdict(cfg),
         "splits": {k: int(len(v)) for k, v in frames.items()},
+        "thresholds": None if thresholds is None else
+                      {s: float(t) for s, t in zip(onto.symptoms, thresholds)},
         "train": final_train, "val": final_val, "test": final_test,
     }
     write_json(os.path.join(out_dir, "performance_metrics.json"), payload)
