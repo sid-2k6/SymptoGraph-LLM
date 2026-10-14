@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .jsonio import write_json
+from .jsonio import read_json, write_json
 
 CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "configs", "symptom_ontology.json")
 DEDUP_PREFIX = 200   # characters of normalised text used to match near-duplicates
@@ -105,8 +105,7 @@ class Ontology:
 
     @classmethod
     def load(cls, path: str = CONFIG) -> "Ontology":
-        with open(path, encoding="utf-8") as fh:
-            cfg = json.load(fh)
+        cfg = read_json(path)
         return cls(
             symptoms=[s["name"] for s in cfg["symptoms"]],
             label_map=cfg["label_map"],

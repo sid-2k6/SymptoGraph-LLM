@@ -20,6 +20,8 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
+from .jsonio import read_json
+
 SELECTION_METRIC = "composite"
 
 
@@ -472,8 +474,7 @@ def collect_runs(root: str) -> dict[str, dict]:
     for name in sorted(os.listdir(root)):
         path = os.path.join(root, name, "aggregate", "aggregate_metrics.json")
         if os.path.isfile(path):
-            with open(path, encoding="utf-8") as fh:
-                found[name] = json.load(fh)
+            found[name] = read_json(path)
     return found
 
 
@@ -779,8 +780,7 @@ def compare_runs(run_dirs: dict, out_dir: str, title: str = "Model comparison",
         meta = os.path.join(path, "aggregate", "aggregate_metrics.json")
         if not os.path.isfile(meta):
             continue
-        with open(meta, encoding="utf-8") as fh:
-            payload = json.load(fh)
+        payload = read_json(meta)
         agg = payload.get("aggregate", payload)
         tables[label] = headline_table(agg, label=label)
         frames.append(tables[label])
