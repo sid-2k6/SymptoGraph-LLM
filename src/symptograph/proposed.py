@@ -37,8 +37,8 @@ import pandas as pd
 from .graph import SymptomGraph
 from .metrics import (aggregate_seeds, compute_metrics, flatten_metrics,
                       headline_table, plot_history_pub, plot_per_symptom_pub,
-                      plot_risk_coverage, plot_seed_aggregate, selective_metrics,
-                      set_publication_style)
+                      plot_risk_coverage, plot_seed_aggregate, positive_weights,
+                      selective_metrics, set_publication_style, tune_thresholds)
 from .jsonio import read_json, write_json
 from .preprocess import Ontology
 from .rng import capture_rng_state, restore_rng_state
@@ -67,7 +67,7 @@ FULL_MODEL = "L5_full"
 @dataclass
 class ProposedConfig:
     """Shared protocol. Identical to the baseline protocol wherever it overlaps."""
-    epochs: int = 8
+    epochs: int = 10
     batch_size: int = 16
     eval_batch_size: int = 64
     max_length: int = 256
@@ -101,19 +101,38 @@ class ProposedConfig:
     contrastive_weight: float = 0.1
     contrastive_temperature: float = 0.1
     contrastive_jaccard: float = 0.5
-    uncertainty_weight: float = 1.0
+    uncertainty_weight: float = 0.5
+    # N6 trained on detached features. Attenuating the primary loss with a
+    # learned variance lets the model cut its loss by declaring uncertainty
+    # instead of fitting, which made the abstention rung strictly worse than the
+    # rung below it. Detached, it adds abstention without costing accuracy.
+    uncertainty_detached: bool = True
+    # N1: pass the concept-gated evidence summary to the heads, not only the 22
+    # concept logits. A bare 22-dim bottleneck starves the severity head, which
+    # saw 768 dims in the flat rung. Set False for the strict-bottleneck ablation.
+    concept_gated_pooling: bool = True
+    # class imbalance; 0 disables
+    pos_weight_cap: float = 10.0
+    # per-symptom decision thresholds tuned on validation, applied to test
+    tune_thresholds: bool = True
+    scheduler: str = "cosine"
+    early_stopping_patience: int = 4
 
     task_weights: dict = field(default_factory=lambda: {
         "symptoms": 1.0, "severity": 1.0, "risk": 1.0, "stress": 0.5})
     weak_label_path: str | None = None
     weak_max_rows: int | None = 20_000
+    # Refuse labels produced by weak_label.MockLabeller. Those are keyword
+    # heuristics meant only for pipeline testing; training N3 on them is
+    # training on noise, and it silently flattens the whole upper ladder.
+    allow_mock_weak_labels: bool = False
     limit_train: int | None = None
     limit_eval: int | None = None
     amp: bool = True
     # "auto" uses bfloat16 where the GPU supports it (L4, A100), which is more
     # numerically stable than fp16 and needs no gradient scaler.
     amp_dtype: str = "auto"
-    selection_metric: str = "composite"
+    selection_metric: str = "selection_score"
     # Full fp32 state including optimiser, so a resumed run is numerically faithful.
     save_optimizer_state: bool = True
     # Writing straight to Drive costs real time for a ~1.5 GB checkpoint. Raise this
@@ -126,11 +145,12 @@ class ProposedConfig:
 
 # Bump when the module layout changes, so stale checkpoints are refused rather
 # than silently loaded into a different network.
-ARCH_VERSION = 3
+ARCH_VERSION = 4
 
 ARCH_FIELDS = ("max_length", "encoder_name", "encoder_fallback", "graph_dim",
                "graph_layers", "use_bottleneck", "use_graph", "use_uncertainty",
-               "use_contrastive", "dropout")
+               "use_contrastive", "dropout", "concept_gated_pooling",
+               "uncertainty_detached")
 
 
 def architecture_fingerprint(rung: str, cfg: ProposedConfig, onto: Ontology) -> tuple:
@@ -228,6 +248,18 @@ def load_frames(processed_dir: str, onto: Ontology, cfg: ProposedConfig) -> dict
 
     if cfg.use_weak and cfg.weak_label_path and os.path.exists(cfg.weak_label_path):
         weak = pd.read_parquet(cfg.weak_label_path)
+        if "labeller" in weak.columns:
+            kinds = {str(k).lower() for k in weak["labeller"].dropna().unique()}
+            if any("mock" in k for k in kinds) and not cfg.allow_mock_weak_labels:
+                raise RuntimeError(
+                    f"{cfg.weak_label_path} was produced by the MOCK labeller "
+                    f"({sorted(kinds)}).\n\n"
+                    "Those labels are keyword heuristics for testing the pipeline, "
+                    "not LLM labels. Training N3 on them is training on noise, and "
+                    "it drags down every rung from L3_weak upward.\n\n"
+                    "Re-run notebook 04 with MOCK = False on a GPU runtime, then "
+                    "retry. To proceed anyway (pipeline testing only), set "
+                    "allow_mock_weak_labels=True.")
         if cfg.weak_max_rows and len(weak) > cfg.weak_max_rows:
             weak = weak.sample(n=cfg.weak_max_rows, random_state=0)
         n = len(weak)
@@ -385,6 +417,7 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
 
             # ---- N2: symptom-disorder graph
             self.use_graph = cfg.use_graph and graph is not None
+            self.gated = cfg.concept_gated_pooling
             if self.use_graph:
                 Dn = len(graph.disorders)
                 self.n_nodes = K + Dn
@@ -406,9 +439,9 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
                     [nn.LayerNorm(gd) for _ in range(cfg.graph_layers)])
                 self.graph_refine = nn.Linear(gd, 1)
                 self.graph_pool = nn.Linear(gd * 2, gd)
-                head_dim = K + gd
+                head_dim = K + gd + (D if self.gated else 0)
             else:
-                head_dim = K
+                head_dim = K + (D if self.gated else 0)
 
             # ---- heads
             if cfg.use_bottleneck:
@@ -470,9 +503,16 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
                     c_logit = c_logit + self.graph_refine(X[:, :k]).squeeze(-1)
                     graph_rep = self.graph_pool(
                         torch.cat([X[:, :k].mean(1), X[:, k:].mean(1)], dim=-1))
-                    feat = torch.cat([c_logit, graph_rep], dim=-1)
+                    parts = [c_logit, graph_rep]
                 else:
-                    feat = c_logit
+                    parts = [c_logit]
+                if self.gated:
+                    # concept-weighted average of the per-symptom evidence
+                    # vectors: downstream heads see only what the concepts
+                    # attended to, gated by how strongly each concept fired
+                    gate = torch.sigmoid(c_logit).unsqueeze(-1)
+                    parts.append((gate * Z).sum(1) / gate.sum(1).clamp(min=1e-6))
+                feat = torch.cat(parts, dim=-1)
                 out.update(symptoms=c_logit, concepts=torch.sigmoid(c_logit))
                 feat = self.drop(feat)
 
@@ -483,7 +523,8 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
                 out["projection"] = torch.nn.functional.normalize(
                     self.projector(pooled), dim=-1)
             if self.cfg.use_uncertainty:
-                out["log_var"] = self.log_var(feat).clamp(-6, 6)
+                head_in = feat.detach() if self.cfg.uncertainty_detached else feat
+                out["log_var"] = self.log_var(head_in).clamp(-6, 6)
             return out
 
     return SymptoGraphLLM(), tokenizer
@@ -515,7 +556,8 @@ def contrastive_loss(projection, symptoms, weights, cfg: ProposedConfig):
     return per_row[target.sum(-1) > 0].mean()
 
 
-def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig):
+def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig,
+                 pos_weight=None):
     import torch
     import torch.nn.functional as F
 
@@ -528,16 +570,25 @@ def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig):
     if valid.any():
         logits, target = out["symptoms"][valid], y[valid].clamp(min=0)
         weight = w[valid]
+        if pos_weight is not None:
+            pw = pos_weight.unsqueeze(0).expand_as(y)[valid]
+            weight = weight * torch.where(target > 0.5, pw, torch.ones_like(pw))
         bce = F.binary_cross_entropy_with_logits(logits, target, reduction="none")
-        if cfg.use_uncertainty and "log_var" in out:
-            # learned loss attenuation: the model may declare a label uncertain,
-            # at a cost, which is what makes the abstention score meaningful
-            s = out["log_var"][valid]
-            bce = torch.exp(-s) * bce + 0.5 * s
-            parts["mean_log_var"] = float(s.mean().detach())
         l = (bce * weight).sum() / weight.sum().clamp(min=1e-6)
         total = total + cfg.task_weights["symptoms"] * l
         parts["symptoms"] = float(l.detach())
+
+        if cfg.use_uncertainty and "log_var" in out:
+            # Train the variance head to predict its own error, on DETACHED
+            # features, so it cannot trade accuracy for confidence.
+            s = out["log_var"][valid]
+            with torch.no_grad():
+                err = (torch.sigmoid(logits) - target).pow(2)
+            unc = (torch.exp(-s) * err + 0.5 * s)
+            lu = (unc * w[valid]).sum() / w[valid].sum().clamp(min=1e-6)
+            total = total + cfg.uncertainty_weight * lu
+            parts["uncertainty"] = float(lu.detach())
+            parts["mean_log_var"] = float(s.mean().detach())
 
     for key in ("severity", "risk"):
         t = batch[key]
@@ -571,7 +622,8 @@ def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig):
 # epoch
 # --------------------------------------------------------------------------- #
 def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=None,
-              device="cpu", train: bool = True, amp_dtype=None):
+              device="cpu", train: bool = True, amp_dtype=None,
+              pos_weight=None, thresholds=None):
     import torch
 
     model.train() if train else model.eval()
@@ -586,10 +638,10 @@ def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=N
             if amp_dtype is not None:
                 with torch.autocast(device_type="cuda", dtype=amp_dtype):
                     out = model(batch)
-                    loss, _ = compute_loss(out, batch, model, cfg)
+                    loss, _ = compute_loss(out, batch, model, cfg, pos_weight)
             else:
                 out = model(batch)
-                loss, _ = compute_loss(out, batch, model, cfg)
+                loss, _ = compute_loss(out, batch, model, cfg, pos_weight)
 
         if train:
             optimizer.zero_grad(set_to_none=True)
@@ -619,7 +671,8 @@ def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=N
     bundle = compute_metrics({
         "symptom_prob": 1 / (1 + np.exp(-preds["symptoms"])),
         "severity_logits": preds["severity"], "risk_logits": preds["risk"],
-        "stress_prob": 1 / (1 + np.exp(-preds["stress"]))}, targets, onto)
+        "stress_prob": 1 / (1 + np.exp(-preds["stress"]))}, targets, onto,
+        thresholds=thresholds)
 
     selective = None
     if unc:
@@ -627,7 +680,9 @@ def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=N
         prob = 1 / (1 + np.exp(-preds["symptoms"]))
         selective = selective_metrics(prob.ravel(), targets["symptoms"].ravel(),
                                       u.ravel())
-    return total_loss / max(n, 1), bundle, selective
+    return total_loss / max(n, 1), bundle, selective, {
+        "symptom_prob": 1 / (1 + np.exp(-preds["symptoms"])),
+        "symptoms": targets["symptoms"]}
 
 
 def _f(v) -> str:
@@ -706,6 +761,14 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
     steps = max(len(loaders["train"]), 1) * cfg.epochs
     scheduler = get_linear_schedule_with_warmup(
         optimizer, int(cfg.warmup_ratio * steps), steps)
+    pos_weight = None
+    if cfg.pos_weight_cap and cfg.pos_weight_cap > 1:
+        pw = positive_weights(frames["train"]["symptoms"], cfg.pos_weight_cap)
+        pos_weight = torch.tensor(pw, device=device)
+        if verbose:
+            print(f"  pos_weight: min {pw.min():.2f} max {pw.max():.2f} "
+                  f"mean {pw.mean():.2f}")
+
     amp_dtype, scaler = resolve_amp(cfg, device)
     if verbose and amp_dtype is not None:
         print(f"  autocast: {str(amp_dtype).replace('torch.', '')}"
@@ -754,14 +817,15 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
 
     best_train_bundle = None
     epoch_times = []
+    since_improved = 0
     for epoch in range(start_epoch, cfg.epochs + 1):
         t0 = time.time()
-        tr_loss, tr_bundle, _ = run_epoch(model, loaders["train"], cfg, onto,
-                                          optimizer, scheduler, scaler, device, True,
-                                          amp_dtype=amp_dtype)
-        va_loss, va_bundle, va_sel = run_epoch(model, loaders["val"], cfg, onto,
-                                               device=device, train=False,
-                                               amp_dtype=amp_dtype)
+        tr_loss, tr_bundle, _, _ = run_epoch(
+            model, loaders["train"], cfg, onto, optimizer, scheduler, scaler,
+            device, True, amp_dtype=amp_dtype, pos_weight=pos_weight)
+        va_loss, va_bundle, va_sel, _ = run_epoch(
+            model, loaders["val"], cfg, onto, device=device, train=False,
+            amp_dtype=amp_dtype, pos_weight=pos_weight)
         score = va_bundle.get(cfg.selection_metric)
         score = -math.inf if score is None else score
         improved = score > best_score
@@ -802,11 +866,17 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
                         "fingerprint_fields": arch_fields,
                         "rng": capture_rng_state()}, last_ckpt)
 
+        since_improved = 0 if improved else since_improved + 1
         epoch_times.append(secs)
         if verbose:
             remaining = (cfg.epochs - epoch) * (sum(epoch_times) / len(epoch_times))
             _print_epoch(epoch, cfg.epochs, tr_loss, tr_bundle, va_loss, va_bundle,
                          secs, improved, remaining)
+        if cfg.early_stopping_patience and since_improved >= cfg.early_stopping_patience:
+            if verbose:
+                print(f"  early stop: no improvement for "
+                      f"{since_improved} epochs (best epoch {best_epoch})")
+            break
 
     history = pd.read_csv(history_path)
     if os.path.isfile(best_ckpt):
@@ -816,10 +886,20 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
     # Only val and test need a fresh pass from the best checkpoint. Train metrics
     # are reused from the best epoch, which saves a full pass over the training
     # set per seed - the single largest saving on a time-limited GPU.
+    thresholds = None
+    if cfg.tune_thresholds:
+        _, _, _, raw = run_epoch(model, loaders["val"], cfg, onto, device=device,
+                                 train=False, amp_dtype=amp_dtype)
+        thresholds = tune_thresholds(raw["symptom_prob"], raw["symptoms"])
+        if verbose:
+            print(f"  tuned thresholds on val: min {thresholds.min():.2f} "
+                  f"max {thresholds.max():.2f}")
+
     finals, selectives = {}, {}
     for split in ("val", "test"):
-        _, bundle, sel = run_epoch(model, loaders[split], cfg, onto,
-                                   device=device, train=False, amp_dtype=amp_dtype)
+        _, bundle, sel, _ = run_epoch(model, loaders[split], cfg, onto,
+                                      device=device, train=False,
+                                      amp_dtype=amp_dtype, thresholds=thresholds)
         finals[split] = bundle
         if sel:
             selectives[split] = sel
@@ -832,9 +912,10 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
             except (ValueError, OSError):
                 best_train_bundle = None     # unreadable: recompute below
     if best_train_bundle is None:
-        _, best_train_bundle, _ = run_epoch(model, loaders["train"], cfg, onto,
-                                            device=device, train=False,
-                                            amp_dtype=amp_dtype)
+        _, best_train_bundle, _, _ = run_epoch(model, loaders["train"], cfg, onto,
+                                               device=device, train=False,
+                                               amp_dtype=amp_dtype,
+                                               thresholds=thresholds)
     finals["train"] = best_train_bundle
 
     payload = {
@@ -853,6 +934,8 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
         "n_weak_rows": frames["train"]["n_weak_rows"],
         "train": finals["train"], "val": finals["val"], "test": finals["test"],
         "selective": selectives,
+        "thresholds": None if thresholds is None else
+                      {s: float(t) for s, t in zip(onto.symptoms, thresholds)},
     }
     write_json(os.path.join(out_dir, "performance_metrics.json"), payload)
 
