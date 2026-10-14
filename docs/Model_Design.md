@@ -215,6 +215,38 @@ labeller is recorded in `run_stats`.
 **Verified:** mock → mock resumes correctly (55 done, 0 to go); mock → real
 archives the old log and relabels all 55, after which the mock guard passes.
 
+### 3.11 Weak labelling was resumable only within a session
+
+Resume reads the JSONL log, and notebook 04 wrote that log to
+`/content/weak_labels` with a single `rsync` to Drive in the *final* cell. Colab
+wipes `/content` when a runtime is recycled, so a disconnect at hour 4 of a
+5-hour labelling run destroyed the log and the next session restarted from zero.
+The in-notebook claim "if the session drops, just re-run this cell" was true only
+for an interrupted cell on a live runtime, not for a lost runtime.
+
+**Fix:** `run_labelling` takes `mirror_to` and snapshots the log to Drive every
+`mirror_every` batches (20, i.e. ≤640 posts ≈ 7 GPU-minutes at risk). The
+snapshot is atomic (`copy` to `.partial`, then `os.replace`) so a death
+mid-upload leaves the previous complete snapshot, and it is taken in a `finally`
+so a `KeyboardInterrupt` also flushes. On start, a mirror with more rows than the
+local log is copied back before resume is computed. `sink.flush()` is now
+followed by `os.fsync`.
+
+The log stays a local write target rather than appending straight to Drive:
+Drive's FUSE mount re-uploads the whole file on each flush, which costs tens of
+MB per batch once the log is large.
+
+`LABELLER_MODEL` is also now pinned in the notebook instead of being chosen from
+available GPU memory. Because resume is keyed on the labeller (§3.10), a session
+that landed on a T4 would have picked the AWQ model, treated the existing log as
+foreign, archived it, and relabelled everything. The notebook now raises if the
+GPU cannot hold the pinned model.
+
+**Verified:** simulated runtime loss — interrupt after 40/200 rows leaves 40 rows
+on the mirror, `/content` is then deleted entirely, and a fresh call recovers the
+40 rows from Drive and reports "40 already labelled, 160 to go", finishing at 200
+with no `.partial` residue. A third call reports 0 to go.
+
 ## 4. Infrastructure fixes (no effect on model behaviour)
 
 | Issue | Cause | Fix |
