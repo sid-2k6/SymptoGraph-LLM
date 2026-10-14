@@ -30,7 +30,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .jsonio import write_json
+from .jsonio import read_json, write_json
 from .preprocess import Ontology
 
 PRIOR_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "configs", "dsm5_prior.json")
@@ -77,8 +77,7 @@ class SymptomGraph:
     @classmethod
     def load(cls, out_dir: str) -> "SymptomGraph":
         z = np.load(os.path.join(out_dir, "graph.npz"))
-        with open(os.path.join(out_dir, "graph_nodes.json"), encoding="utf-8") as fh:
-            meta = json.load(fh)
+        meta = read_json(os.path.join(out_dir, "graph_nodes.json"))
         return cls(symptoms=meta["symptoms"], disorders=meta["disorders"],
                    A_sd=z["A_sd"], A_ss=z["A_ss"], A_ss_mask=z["A_ss_mask"],
                    A_ss_support=z["A_ss_support"], A_dd=z["A_dd"],
@@ -115,8 +114,7 @@ def ppmi_from_counts(joint: np.ndarray, totals: np.ndarray, n: int,
 # --------------------------------------------------------------------------- #
 def build_prior(onto: Ontology, disorders: list[str],
                 prior_path: str = PRIOR_CONFIG) -> tuple[np.ndarray, dict]:
-    with open(prior_path, encoding="utf-8") as fh:
-        cfg = json.load(fh)
+    cfg = read_json(prior_path)
     edges = cfg["edges"]
     A = np.zeros((len(onto.symptoms), len(disorders)), dtype=np.float32)
     sym_ix = {s: i for i, s in enumerate(onto.symptoms)}
@@ -338,8 +336,7 @@ def build(processed_dir: str, out_dir: str, min_support: int = 10,
     disorders = sorted(set(d for d in weak_train.get("disorder_weak", pd.Series(dtype=object))
                            .dropna().unique()))
     if not disorders:
-        with open(PRIOR_CONFIG, encoding="utf-8") as fh:
-            disorders = sorted(json.load(fh)["edges"].keys())
+        disorders = sorted(read_json(PRIOR_CONFIG)["edges"].keys())
     say(f"disorder nodes: {len(disorders)}")
 
     A_sd, prior_meta = build_prior(onto, disorders)

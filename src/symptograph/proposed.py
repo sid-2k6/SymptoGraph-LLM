@@ -39,7 +39,7 @@ from .metrics import (aggregate_seeds, compute_metrics, flatten_metrics,
                       headline_table, plot_history_pub, plot_per_symptom_pub,
                       plot_risk_coverage, plot_seed_aggregate, selective_metrics,
                       set_publication_style)
-from .jsonio import write_json
+from .jsonio import read_json, write_json
 from .preprocess import Ontology
 from .rng import capture_rng_state, restore_rng_state
 
@@ -827,8 +827,10 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
     if best_train_bundle is None:
         cached = os.path.join(out_dir, "best_train_metrics.json")
         if os.path.isfile(cached):
-            with open(cached, encoding="utf-8") as fh:
-                best_train_bundle = json.load(fh)
+            try:
+                best_train_bundle = read_json(cached)
+            except (ValueError, OSError):
+                best_train_bundle = None     # unreadable: recompute below
     if best_train_bundle is None:
         _, best_train_bundle, _ = run_epoch(model, loaders["train"], cfg, onto,
                                             device=device, train=False,
