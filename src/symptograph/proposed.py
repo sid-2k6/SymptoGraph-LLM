@@ -113,6 +113,10 @@ class ProposedConfig:
     concept_gated_pooling: bool = True
     # class imbalance; 0 disables
     pos_weight_cap: float = 10.0
+    # Depression severity is 72% "minimum" (1767/205/288/196) and risk is
+    # similarly skewed. Unweighted cross-entropy collapses both heads onto the
+    # majority class, which is why QWK sat at exactly 0.000.
+    ordinal_class_weights: bool = True
     # per-symptom decision thresholds tuned on validation, applied to test
     tune_thresholds: bool = True
     scheduler: str = "cosine"
@@ -145,7 +149,7 @@ class ProposedConfig:
 
 # Bump when the module layout changes, so stale checkpoints are refused rather
 # than silently loaded into a different network.
-ARCH_VERSION = 4
+ARCH_VERSION = 5
 
 ARCH_FIELDS = ("max_length", "encoder_name", "encoder_fallback", "graph_dim",
                "graph_layers", "use_bottleneck", "use_graph", "use_uncertainty",
@@ -556,8 +560,18 @@ def contrastive_loss(projection, symptoms, weights, cfg: ProposedConfig):
     return per_row[target.sum(-1) > 0].mean()
 
 
+def class_weights(values: np.ndarray, n_classes: int, cap: float = 10.0):
+    """Inverse-frequency weights for an ordinal target, capped."""
+    v = values[~np.isnan(values)].astype(int)
+    if v.size == 0:
+        return None
+    counts = np.bincount(v, minlength=n_classes).astype(np.float32)
+    w = np.where(counts > 0, counts.sum() / np.maximum(counts, 1) / n_classes, 1.0)
+    return np.clip(w, 1.0 / cap, cap).astype(np.float32)
+
+
 def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig,
-                 pos_weight=None):
+                 pos_weight=None, ordinal_weights=None):
     import torch
     import torch.nn.functional as F
 
@@ -594,7 +608,8 @@ def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig,
         t = batch[key]
         m = ~torch.isnan(t)
         if m.any():
-            l = F.cross_entropy(out[key][m], t[m].long())
+            cw = (ordinal_weights or {}).get(key)
+            l = F.cross_entropy(out[key][m], t[m].long(), weight=cw)
             total = total + cfg.task_weights[key] * l
             parts[key] = float(l.detach())
 
@@ -623,7 +638,7 @@ def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig,
 # --------------------------------------------------------------------------- #
 def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=None,
               device="cpu", train: bool = True, amp_dtype=None,
-              pos_weight=None, thresholds=None):
+              pos_weight=None, thresholds=None, ordinal_weights=None):
     import torch
 
     model.train() if train else model.eval()
@@ -638,10 +653,12 @@ def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=N
             if amp_dtype is not None:
                 with torch.autocast(device_type="cuda", dtype=amp_dtype):
                     out = model(batch)
-                    loss, _ = compute_loss(out, batch, model, cfg, pos_weight)
+                    loss, _ = compute_loss(out, batch, model, cfg, pos_weight,
+                                           ordinal_weights)
             else:
                 out = model(batch)
-                loss, _ = compute_loss(out, batch, model, cfg, pos_weight)
+                loss, _ = compute_loss(out, batch, model, cfg, pos_weight,
+                                       ordinal_weights)
 
         if train:
             optimizer.zero_grad(set_to_none=True)
@@ -769,6 +786,18 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
             print(f"  pos_weight: min {pw.min():.2f} max {pw.max():.2f} "
                   f"mean {pw.mean():.2f}")
 
+    ordinal_weights = None
+    if cfg.ordinal_class_weights:
+        ordinal_weights = {}
+        for key, n_cls in (("severity", N_SEVERITY), ("risk", N_RISK)):
+            cw = class_weights(frames["train"][key], n_cls)
+            if cw is not None:
+                ordinal_weights[key] = torch.tensor(cw, device=device)
+        if verbose and ordinal_weights:
+            for k, v in ordinal_weights.items():
+                print(f"  {k} class weights: "
+                      f"{[round(float(x), 2) for x in v.tolist()]}")
+
     amp_dtype, scaler = resolve_amp(cfg, device)
     if verbose and amp_dtype is not None:
         print(f"  autocast: {str(amp_dtype).replace('torch.', '')}"
@@ -822,10 +851,12 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
         t0 = time.time()
         tr_loss, tr_bundle, _, _ = run_epoch(
             model, loaders["train"], cfg, onto, optimizer, scheduler, scaler,
-            device, True, amp_dtype=amp_dtype, pos_weight=pos_weight)
+            device, True, amp_dtype=amp_dtype, pos_weight=pos_weight,
+            ordinal_weights=ordinal_weights)
         va_loss, va_bundle, va_sel, _ = run_epoch(
             model, loaders["val"], cfg, onto, device=device, train=False,
-            amp_dtype=amp_dtype, pos_weight=pos_weight)
+            amp_dtype=amp_dtype, pos_weight=pos_weight,
+            ordinal_weights=ordinal_weights)
         score = va_bundle.get(cfg.selection_metric)
         score = -math.inf if score is None else score
         improved = score > best_score
