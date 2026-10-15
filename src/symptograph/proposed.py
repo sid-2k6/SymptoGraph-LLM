@@ -126,6 +126,18 @@ class ProposedConfig:
         "symptoms": 1.0, "severity": 1.0, "risk": 1.0, "stress": 0.5})
     weak_label_path: str | None = None
     weak_max_rows: int | None = 20_000
+    # Weak rows used to be concatenated into the training frame. That inflated
+    # steps per epoch by 46%, so L3-L5 ran a different LR schedule from L0-L2,
+    # and it diluted the sparse tasks: rows per batch carrying a risk label fell
+    # from 0.84 to 0.58, which cost risk QWK 0.19. As a stream the weak rows are
+    # a per-step auxiliary symptom loss instead, so steps per epoch, the
+    # schedule and the gold batch composition all stay identical to L0-L2.
+    # Cost is fixed by weak_batch_size, NOT by the size of the weak pool, so
+    # using all 50k labels costs the same as using 6k.
+    weak_as_stream: bool = True
+    weak_batch_size: int | None = None      # None -> batch_size
+    weak_every: int = 1                     # draw a weak batch every N steps
+    weak_stream_weight: float = 1.0
     # Refuse labels produced by weak_label.MockLabeller. Those are keyword
     # heuristics meant only for pipeline testing; training N3 on them is
     # training on noise, and it silently flattens the whole upper ladder.
@@ -161,6 +173,12 @@ def architecture_fingerprint(rung: str, cfg: ProposedConfig, onto: Ontology) -> 
     fields = {"rung": rung, "n_symptoms": len(onto.symptoms),
               "arch_version": ARCH_VERSION,
               **{f: getattr(cfg, f) for f in ARCH_FIELDS}}
+    # ``weak_as_stream`` only enters the fingerprint for rungs that actually use
+    # weak data. A rung with use_weak=False runs identical code either way, so
+    # including it unconditionally would invalidate the existing L0-L2
+    # checkpoints for a change that provably cannot affect them.
+    if cfg.use_weak:
+        fields["weak_as_stream"] = cfg.weak_as_stream
     blob = json.dumps(fields, sort_keys=True, default=str).encode()
     return hashlib.md5(blob).hexdigest()[:12], fields
 
@@ -280,15 +298,28 @@ def load_frames(processed_dir: str, onto: Ontology, cfg: ProposedConfig) -> dict
                 weights[ok, i] = conf[ok]          # confidence weighting (N3)
         tr = frames["train"]
         nan = np.full(n, np.nan, dtype=np.float32)
-        frames["train"] = {
-            "text": tr["text"] + weak["text"].fillna("").tolist(),
-            "symptoms": np.concatenate([tr["symptoms"], labels]),
-            "sym_weight": np.concatenate([tr["sym_weight"], weights]),
-            "severity": np.concatenate([tr["severity"], nan]),
-            "risk": np.concatenate([tr["risk"], nan]),
-            "stress": np.concatenate([tr["stress"], nan]),
-            "n_weak_rows": n,
+        weak_frame = {
+            "text": weak["text"].fillna("").tolist(),
+            "symptoms": labels, "sym_weight": weights,
+            "severity": nan, "risk": nan, "stress": nan, "n_weak_rows": n,
         }
+        if cfg.weak_as_stream:
+            # Separate stream: train keeps exactly the gold rows, so steps per
+            # epoch, the LR schedule, pos_weight and the per-batch density of
+            # severity/risk/stress labels are all unchanged from L0-L2.
+            tr["n_weak_rows"] = n
+            frames["weak"] = weak_frame
+        else:
+            # Legacy concatenation, kept so the earlier run can be reproduced.
+            frames["train"] = {
+                "text": tr["text"] + weak_frame["text"],
+                "symptoms": np.concatenate([tr["symptoms"], labels]),
+                "sym_weight": np.concatenate([tr["sym_weight"], weights]),
+                "severity": np.concatenate([tr["severity"], nan]),
+                "risk": np.concatenate([tr["risk"], nan]),
+                "stress": np.concatenate([tr["stress"], nan]),
+                "n_weak_rows": n,
+            }
     return frames
 
 
@@ -571,7 +602,18 @@ def class_weights(values: np.ndarray, n_classes: int, cap: float = 10.0):
 
 
 def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig,
-                 pos_weight=None, ordinal_weights=None):
+                 pos_weight=None, ordinal_weights=None, weak_pass: bool = False):
+    """Multi-task loss. ``weak_pass`` restricts it to the symptom terms.
+
+    On a weak batch severity, risk and stress are all NaN and would mask out
+    anyway, but two terms must be skipped explicitly:
+
+    * the graph L1 penalty is a *parameter* penalty, so adding it on both passes
+      would double the regularisation on L3-L5 relative to L2;
+    * the contrastive loss defines positives by symptom-profile overlap, and a
+      weak row only observes 11 of 22 symptoms, so the overlap is computed on a
+      partially observed profile and is not comparable to a gold row's.
+    """
     import torch
     import torch.nn.functional as F
 
@@ -603,6 +645,9 @@ def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig,
             total = total + cfg.uncertainty_weight * lu
             parts["uncertainty"] = float(lu.detach())
             parts["mean_log_var"] = float(s.mean().detach())
+
+    if weak_pass:
+        return total, parts
 
     for key in ("severity", "risk"):
         t = batch[key]
@@ -636,9 +681,38 @@ def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig,
 # --------------------------------------------------------------------------- #
 # epoch
 # --------------------------------------------------------------------------- #
+def cycle_loader(loader):
+    """Endless iterator over a loader, reshuffled each time it wraps around."""
+    while True:
+        for b in loader:
+            yield b
+
+
+def _add_weak_term(loss, model, cfg, pos_weight, ordinal_weights, weak_iter,
+                   device, train, step):
+    """Add the auxiliary weak-label symptom loss to ``loss`` for one step.
+
+    Returns ``(loss, weak_loss_value_or_None)``. Runs inside the caller's
+    autocast context so the weak forward uses the same precision, and inside the
+    same graph so the step stays a single optimiser update: the number of
+    optimiser steps per epoch must not depend on whether weak labels are used.
+    """
+    if not (train and weak_iter is not None):
+        return loss, None
+    if cfg.weak_every > 1 and step % cfg.weak_every != 0:
+        return loss, None
+    wb = next(weak_iter)
+    wb = {k: (v.to(device) if hasattr(v, "to") else v) for k, v in wb.items()}
+    wout = model(wb)
+    wloss, _ = compute_loss(wout, wb, model, cfg, pos_weight, ordinal_weights,
+                            weak_pass=True)
+    return loss + cfg.weak_stream_weight * wloss, float(wloss.detach())
+
+
 def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=None,
               device="cpu", train: bool = True, amp_dtype=None,
-              pos_weight=None, thresholds=None, ordinal_weights=None):
+              pos_weight=None, thresholds=None, ordinal_weights=None,
+              weak_iter=None):
     import torch
 
     model.train() if train else model.eval()
@@ -647,6 +721,8 @@ def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=N
     tgt = {k: [] for k in keys}
     unc, total_loss, n = [], 0.0, 0
 
+    step = 0
+    weak_loss_sum, weak_steps = 0.0, 0
     for batch in loader:
         batch = {k: (v.to(device) if hasattr(v, "to") else v) for k, v in batch.items()}
         with torch.set_grad_enabled(train):
@@ -655,10 +731,20 @@ def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=N
                     out = model(batch)
                     loss, _ = compute_loss(out, batch, model, cfg, pos_weight,
                                            ordinal_weights)
+                    loss, wl = _add_weak_term(loss, model, cfg, pos_weight,
+                                              ordinal_weights, weak_iter, device,
+                                              train, step)
             else:
                 out = model(batch)
                 loss, _ = compute_loss(out, batch, model, cfg, pos_weight,
                                        ordinal_weights)
+                loss, wl = _add_weak_term(loss, model, cfg, pos_weight,
+                                          ordinal_weights, weak_iter, device,
+                                          train, step)
+        if wl is not None:
+            weak_loss_sum += wl
+            weak_steps += 1
+        step += 1
 
         if train:
             optimizer.zero_grad(set_to_none=True)
@@ -699,7 +785,11 @@ def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=N
                                       u.ravel())
     return total_loss / max(n, 1), bundle, selective, {
         "symptom_prob": 1 / (1 + np.exp(-preds["symptoms"])),
-        "symptoms": targets["symptoms"]}
+        "symptoms": targets["symptoms"],
+        # Logged so the weak stream can be confirmed to have actually run, and
+        # its loss tracked separately from the gold objective.
+        "weak_loss": (weak_loss_sum / weak_steps) if weak_steps else None,
+        "weak_steps": weak_steps}
 
 
 def _f(v) -> str:
@@ -765,6 +855,21 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
                           else cfg.eval_batch_size,
                           shuffle=(split == "train"), collate_fn=collate)
         for split in ("train", "val", "test")}
+
+    # Auxiliary weak stream. Its length does not affect steps per epoch, so the
+    # size of the weak pool is free: 50k labels cost the same as 6k.
+    weak_loader = None
+    if frames.get("weak"):
+        weak_loader = DataLoader(
+            ProposedDataset(frames["weak"]),
+            batch_size=cfg.weak_batch_size or cfg.batch_size,
+            shuffle=True, drop_last=True, collate_fn=collate)
+        if verbose:
+            print(f"  weak stream: {len(frames['weak']['text']):,} rows, "
+                  f"batch {cfg.weak_batch_size or cfg.batch_size}, "
+                  f"every {cfg.weak_every} step(s), "
+                  f"weight {cfg.weak_stream_weight} "
+                  f"-> steps/epoch unchanged at {len(loaders['train'])}")
 
     enc_params, head_params = [], []
     for pname, p in model.named_parameters():
@@ -849,10 +954,11 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
     since_improved = 0
     for epoch in range(start_epoch, cfg.epochs + 1):
         t0 = time.time()
-        tr_loss, tr_bundle, _, _ = run_epoch(
+        tr_loss, tr_bundle, _, tr_extra = run_epoch(
             model, loaders["train"], cfg, onto, optimizer, scheduler, scaler,
             device, True, amp_dtype=amp_dtype, pos_weight=pos_weight,
-            ordinal_weights=ordinal_weights)
+            ordinal_weights=ordinal_weights,
+            weak_iter=cycle_loader(weak_loader) if weak_loader else None)
         va_loss, va_bundle, va_sel, _ = run_epoch(
             model, loaders["val"], cfg, onto, device=device, train=False,
             amp_dtype=amp_dtype, pos_weight=pos_weight,
@@ -868,6 +974,8 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
                "lr_head": optimizer.param_groups[1]["lr"],
                "epoch_seconds": round(secs, 2),
                "timestamp": pd.Timestamp.utcnow().isoformat()}
+        row["train_weak_loss"] = tr_extra.get("weak_loss")
+        row["train_weak_steps"] = tr_extra.get("weak_steps")
         row.update(flatten_metrics(tr_bundle, "train"))
         row.update(flatten_metrics(va_bundle, "val"))
         if va_sel:

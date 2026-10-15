@@ -247,6 +247,69 @@ on the mirror, `/content` is then deleted entirely, and a fresh call recovers th
 40 rows from Drive and reports "40 already labelled, 160 to go", finishing at 200
 with no `.partial` residue. A third call reports 0 to go.
 
+### 3.12 Weak rows were concatenated into the training frame — the reason the ladder inverted at L3
+
+`load_frames` appended the weak rows to the training frame. For L3–L5 that
+changed the training protocol itself, not just the data:
+
+| | L0–L2 | L3–L5 (concatenated) |
+|---|---|---|
+| train rows | 12,911 | 18,911 |
+| optimiser steps / epoch | 404 | 591 |
+| cosine schedule spans | 4,040 steps | 5,910 steps |
+| rows per batch with a risk label | 0.84 | 0.58 |
+| `pos_weight` computed over | gold only | gold + weak |
+
+So the upper rungs ran a different learning-rate schedule and a thinner gold
+batch than the rungs they were being compared against. The observed damage
+tracks label sparsity, which is the signature of per-batch dilution rather than
+of weak-label noise:
+
+| task | train rows | L2 → L3 | delta |
+|---|---|---|---|
+| symptoms | 6,227 | 0.896 → 0.891 | −0.005 |
+| stress | ~3,526 | 0.907 → 0.905 | −0.002 |
+| severity (depression) | 2,456 | 0.480 → 0.443 | −0.037 |
+| risk | 340 | 0.438 → 0.249 | **−0.189** |
+
+**Fix:** `weak_as_stream=True` makes the weak rows a separate loader, drawn once
+per optimiser step and contributing only the symptom terms (`weak_pass=True` in
+`compute_loss` skips severity/risk/stress, the graph L1 — a *parameter* penalty
+that would otherwise be counted twice — and the contrastive loss, whose
+symptom-profile positives are not meaningful on a row where only 11 of 22
+symptoms are observed). Steps per epoch, the schedule, `pos_weight` and the gold
+batch composition all return to their L0–L2 values. The legacy path is kept so
+the earlier run can be reproduced.
+
+Two consequences worth recording:
+
+- Stream cost is set by `weak_batch_size`, not by the size of the weak pool, so
+  **all ~50,000 real Qwen labels cost the same as the 6,000 used before**.
+- `ARCH_VERSION` stays at 5 and `weak_as_stream` enters the fingerprint **only
+  when `use_weak` is true**. A rung with `use_weak=False` executes identical
+  code either way, so the existing L0–L2 checkpoints and results remain valid
+  and directly comparable. This is what lets notebook 07 retrain 9 runs instead
+  of 18.
+
+**Verified** (CPU, synthetic data): stream mode leaves train rows (300), steps
+per epoch (19), `pos_weight` mean (1.08592) and risk rows per batch (0.640)
+bit-identical to a `use_weak=False` run, while legacy mode inflates steps
+19 → 75 and thins risk density 0.640 → 0.160. The weak stream runs on all 19
+steps per epoch and `weak_every=2` halves that to 10. Notebook 07 additionally
+asserts at runtime that the per-epoch encoder LR matches `L2_graph`'s to within
+1e-9, which is only possible if steps per epoch and total steps agree.
+
+### 3.13 The metric set cannot credit N3 directly
+
+`symptom_macro_auroc[all]` equals `symptom_macro_auroc[gold_supervised]` in
+every run, because the 11 weak-only symptoms have **no gold labels in any
+split**. Weak supervision can therefore only show up as transfer to the 11 gold
+symptoms; its direct effect on the symptoms it actually supervises is
+unmeasurable with current data. This is a measurement gap, not a model
+weakness, and it caps how large an N3 effect any experiment here can detect.
+Closing it requires the 800-post in-house anxiety gold set (notebook 04,
+section 8), not more training.
+
 ## 4. Infrastructure fixes (no effect on model behaviour)
 
 | Issue | Cause | Fix |
@@ -258,34 +321,51 @@ with no `.partial` residue. A third call reports 0 to go.
 
 ## 5. Honest status of the ladder
 
-As of the last full run (6 epochs, MentalRoBERTa, before §3.3–§3.7), best
-validation composite per seed:
+Latest full run: 10 epochs, MentalRoBERTa, real Qwen2.5-7B weak labels, with
+§3.3–§3.10 applied. Mean ± std across 3 seeds (validation):
 
-| rung | seeds | mean |
-|---|---|---|
-| `L0_flat` | 0.552 / 0.532 / 0.545 | 0.543 |
-| `L1_bottleneck` | 0.526 / 0.537 / 0.522 | 0.528 |
-| `L2_graph` | 0.521 / 0.577 / 0.525 | 0.541 |
-| `L3_weak` | 0.531 / 0.519 / 0.535 | 0.528 |
+| rung | composite | selection_score | sev QWK | risk QWK | sym AUROC | stress AUROC |
+|---|---|---|---|---|---|---|
+| `L0_flat` | 0.531 ± 0.009 | 0.717 ± 0.004 | 0.486 | 0.324 | 0.883 | 0.908 |
+| `L1_bottleneck` | 0.549 ± 0.027 | 0.720 ± 0.004 | 0.471 | 0.384 | 0.896 | 0.906 |
+| `L2_graph` | **0.571 ± 0.015** | **0.724 ± 0.005** | 0.480 | **0.438** | 0.896 | 0.907 |
+| `L3_weak` | 0.494 ± 0.003 | 0.708 ± 0.004 | 0.443 | 0.249 | 0.891 | 0.905 |
+| `L4_contrastive` | 0.544 ± 0.025 | 0.712 ± 0.007 | 0.475 | 0.380 | 0.883 | 0.910 |
+| `L5_full` | 0.526 ± 0.027 | 0.714 ± 0.006 | 0.471 | 0.323 | 0.887 | 0.909 |
 
-The ladder is **flat within seed noise**. No component has yet demonstrated a
-gain, and `L3_weak` was trained on mock labels so its result carries no
-information about N3 at all.
+Two separate readings:
 
-Two things could legitimately change this, in order of expected effect:
+**Absolute performance is good where the data supports it.** Symptom macro AUROC
+~0.89 and stress AUROC ~0.91 across all rungs, with seed std ≤ 0.015. These are
+the defensible headline numbers for a detection paper.
 
-1. **Real weak labels** (§3.8). N3, and the contrastive objective that consumes
-   symptom profiles, were both running on noise.
-2. **Ordinal class weights** (§3.9), which moved severity QWK from 0.005 to
-   0.509 in a small-scale test. Since severity QWK is one of three terms in both
-   `composite` and `selection_score`, this lifts every rung and makes the
-   severity task actually informative for the first time.
-3. **The calibration and capacity fixes** (§3.3, §3.5), measured to help
-   substantially in small-scale tests but not yet run at full scale.
+**The ladder inverts at L3**, and §3.12 identifies why: weak rows were
+concatenated into the training frame, so L3–L5 ran a different LR schedule and a
+diluted gold batch. That is a protocol confound, not evidence about N3. Notebook
+07 retrains L3–L5 only, under a protocol asserted to match L0–L2, which is the
+cheapest valid way to re-test it (9 runs, not 18).
 
-What must **not** happen: tuning hyperparameters per rung until `L5_full` wins.
-Every setting in §3 is shared by all six rungs, which is the only thing that
-makes the ladder interpretable. If `L5_full` still does not beat the lower rungs
-after the fixes above, the correct action is to report that — a clean negative
-result on one or two components is far more credible than six components that all
-conveniently help.
+`composite` and `selection_score` both average suicide-risk QWK — **74 test
+rows, 340 train rows** — in with everything else, so they are dominated by the
+noisiest task in the suite. Per-task reporting (notebook 07 §9) is the honest
+presentation; the composite should be a secondary number at most.
+
+### What must not happen
+
+Tuning hyperparameters per rung until `L5_full` wins. Every setting in §3 is
+shared across rungs, which is the only thing that makes the ladder
+interpretable. A ladder where only the top rung received attention measures the
+tuning, not the novelties.
+
+Equally: targeting a fixed headline figure. "Above 0.85 on all metrics" is not
+reachable on these corpora and would not be believed if reported —
+`severity_risk_qwk` is bounded by 340 training rows and by human agreement on
+ordinal suicide-risk scales, and the MAE metrics are lower-is-better, so pushing
+them "above 0.85" would mean making the model worse. Two metrics
+(`stress_auroc`, `symptom_macro_auroc`) already clear 0.85 honestly; those are
+the ones to lead with.
+
+If `L5_full` still does not beat the lower rungs after §3.12, the correct action
+is to report that. A clean negative result on contrastive and uncertainty is
+more credible than five components that all conveniently help, and §3.13 already
+explains why the current metric set cannot credit N3 directly.
