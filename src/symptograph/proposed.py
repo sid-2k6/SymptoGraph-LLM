@@ -253,23 +253,63 @@ ARCH_FIELDS = ("max_length", "encoder_name", "encoder_fallback", "graph_dim",
                "graph_layers", "use_bottleneck", "use_graph", "use_uncertainty",
                "use_contrastive", "dropout", "concept_gated_pooling",
                "uncertainty_detached", "use_monotone_ordinal",
-               "monotone_nonneg", "monotone_residual", "monotone_shared_trait",
-               "use_noise_correction",
-               "freeze_encoder_layers")
+               "use_noise_correction", "freeze_encoder_layers")
+
+# Fields that only describe a component, and so only belong in the fingerprint
+# when that component is switched on. Including them unconditionally refuses to
+# resume runs the change provably cannot affect: M0_flat has no monotone head,
+# so monotone_shared_trait says nothing about its architecture.
+CONDITIONAL_ARCH_FIELDS = {
+    "weak_as_stream": lambda c: c.use_weak,
+    "monotone_nonneg": lambda c: c.use_monotone_ordinal and c.use_bottleneck,
+    "monotone_residual": lambda c: c.use_monotone_ordinal and c.use_bottleneck,
+    "monotone_shared_trait": lambda c: c.use_monotone_ordinal and c.use_bottleneck,
+}
+
+# Fields introduced after some runs had already been trained. A checkpoint from
+# before the field recorded nothing for it, so the value here is what the code
+# actually did at that time: a run requesting that value is the same
+# architecture and may resume. Any other value is a genuine mismatch.
+LEGACY_ARCH_DEFAULTS = {
+    "monotone_shared_trait": True,   # the head had one shared trait when added
+    "weak_as_stream": False,         # weak rows were concatenated
+}
 
 
 def architecture_fingerprint(rung: str, cfg: ProposedConfig, onto: Ontology) -> tuple:
     fields = {"rung": rung, "n_symptoms": len(onto.symptoms),
               "arch_version": ARCH_VERSION,
               **{f: getattr(cfg, f) for f in ARCH_FIELDS}}
-    # ``weak_as_stream`` only enters the fingerprint for rungs that actually use
-    # weak data. A rung with use_weak=False runs identical code either way, so
-    # including it unconditionally would invalidate the existing L0-L2
-    # checkpoints for a change that provably cannot affect them.
-    if cfg.use_weak:
-        fields["weak_as_stream"] = cfg.weak_as_stream
+    for name, applies in CONDITIONAL_ARCH_FIELDS.items():
+        if applies(cfg):
+            fields[name] = getattr(cfg, name)
     blob = json.dumps(fields, sort_keys=True, default=str).encode()
     return hashlib.md5(blob).hexdigest()[:12], fields
+
+
+def fingerprint_changes(saved_hash: str, saved_fields: dict,
+                        fingerprint: str, arch_fields: dict) -> dict:
+    """Fields that genuinely differ between a checkpoint and the current config.
+
+    Returns an empty dict when the checkpoint is safe to resume. A field the
+    checkpoint simply predates is not a difference, provided the current value
+    matches what the code did before the field existed - see
+    ``LEGACY_ARCH_DEFAULTS``. Comparing only the hashes would refuse those,
+    throwing away finished runs for no reason.
+    """
+    if saved_hash == fingerprint:
+        return {}
+    changed = {}
+    for k, now in arch_fields.items():
+        if k not in saved_fields or saved_fields[k] is None:
+            if LEGACY_ARCH_DEFAULTS.get(k, object()) == now:
+                continue
+        if saved_fields.get(k) != now:
+            changed[k] = (saved_fields.get(k), now)
+    for k, old in saved_fields.items():
+        if k not in arch_fields and old is not None:
+            changed[k] = (old, None)
+    return changed
 
 
 # Encoders that are domain-pretrained for mental health. "gated: auto" means the
@@ -1171,10 +1211,10 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
     if resume and os.path.isfile(last_ckpt):
         ck = torch.load(last_ckpt, map_location=device, weights_only=False)
         saved = ck.get("fingerprint")
-        if saved and saved != fingerprint:
-            old = ck.get("fingerprint_fields", {})
-            changed = {k: (old.get(k), v) for k, v in arch_fields.items()
-                       if old.get(k) != v}
+        changed = ({} if not saved else
+                   fingerprint_changes(saved, ck.get("fingerprint_fields", {}),
+                                       fingerprint, arch_fields))
+        if changed:
             raise RuntimeError(
                 f"Refusing to resume: {last_ckpt} came from a different architecture.\n"
                 + "\n".join(f"    {k}: checkpoint={o!r} now={n!r}"
