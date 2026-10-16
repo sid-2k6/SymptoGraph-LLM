@@ -369,3 +369,112 @@ If `L5_full` still does not beat the lower rungs after §3.12, the correct actio
 is to report that. A clean negative result on contrastive and uncertainty is
 more credible than five components that all conveniently help, and §3.13 already
 explains why the current metric set cannot credit N3 directly.
+
+## 6. v2: what was removed, what was added, and why
+
+Revision in response to external review. The review's ten comments map to fixes
+as follows: **seven are measurement, protocol or data issues that no
+architecture can address** (baseline encoder fallback, protocol mismatch,
+best-epoch selection, labeller bias, the N3 measurement gap, the post-hoc
+retrain, and the absence of significance tests). Only label-noise propagation
+and the graph's justification are architectural. None of the review's six action
+items asks for a new model.
+
+### 6.1 The constraint that drove the design
+
+Training risk QWK reaches **1.000** and training severity QWK **1.000** by epoch
+6, against validation ~0.40 and ~0.47, with validation loss rising from epoch 2.
+A model that fits its training set perfectly is not short of representational
+power. Every v2 change therefore either **reduces effective capacity** or
+**corrects supervision**; none adds a module.
+
+### 6.2 Removed
+
+| component | evidence |
+|---|---|
+| N5 contrastive | 0.544 → 0.537 over two full runs; within seed noise, and it costs a projection head plus a loss term |
+| N6 uncertainty | measured −0.003; hypothesis already recorded as wrong in §3.4 |
+| N2 graph (demoted) | L1→L2 is 0.549→0.571 with sds 0.027 and 0.015, so it does not clear seed noise; retained as control `C_graph` |
+
+### 6.3 N-A — instrument-grounded monotone ordinal head
+
+PHQ-9 severity is defined as a threshold function of the sum of its nine item
+scores, and 9 of the 22 symptoms are those items (7 more are GAD-7, confirmed in
+`configs/symptom_ontology.json`). The free `Linear(head_in, 4)` severity head
+discarded that structure. v2 uses one latent trait with a cumulative-link model
+per ordinal task:
+
+```
+z       = Σ_k softplus(v_k) · σ(c_k)   [+ small residual]
+P(y ≥ j) = σ(z − τ_j),  τ_1 < … < τ_{J−1}
+```
+
+Risk now fits **4 cutpoints** on its 340 rows instead of a whole head, and `z`
+is trained by the 2,456 severity rows as well. Non-negative `v_k` makes severity
+provably monotone in symptom presence. Class log-probabilities are returned
+rather than logits, which is correct for `cross_entropy` because `log_softmax`
+is a no-op on normalised log-probabilities — so the existing loss and metric
+code needed no special case.
+
+Built from established components (cumulative-link / CORAL ordinal regression,
+monotone networks); the contribution is the composition and the instrument
+grounding. **A literature check is still required before claiming novelty.**
+
+**Verified:** item weights non-negative (min 0.0486); cutpoints strictly
+increasing for both tasks; expected severity monotone in `z` over a sweep from
+−3 to 6; class probabilities sum to 1 to 1e-5.
+
+### 6.4 N-B — per-symptom labeller noise channel
+
+A single confidence temperature rescales every label equally and cannot fix
+systematic bias: the labeller calls `low_self_esteem` present 80% of the time
+where gold prevalence is 24%. `scripts/fit_noise_channel.py` estimates
+`tpr_k = P(LLM positive | gold positive)` and `fpr_k = P(LLM positive | gold
+negative)` from `validation_labels.jsonl`, with Laplace smoothing and a minimum
+support of 20 per cell. Training then applies **forward correction** — the
+network predicts the clean probability `p`, and the loss scores
+`p·tpr_k + (1−p)·fpr_k` against the noisy label.
+
+**Limitation, stated rather than buried:** the 11 weak-only symptoms have no
+gold labels, so their channel is **not identifiable**. It is pooled within
+instrument and every such symptom is marked `"source": "pooled_by_instrument"`.
+This is the same measurement gap as §3.13 and it means the weak-only half of N-B
+cannot be validated until the in-house gold set exists.
+
+**Verified:** on synthetic data with three deliberately over-calling symptoms,
+the fitter recovered exactly those three (fpr 0.70 / 0.66 / 0.66 against 0.08–0.17
+for the rest).
+
+### 6.5 N-C — author-consistency, deliberately not implemented
+
+Author-level consistency would add supervision from the ~968k unlabelled posts,
+which targets the real bottleneck. But `weak_pool.parquet` averages **1.34 posts
+per author** and the distribution has not been measured. Notebook 08 §2b
+measures it and prints a verdict. Implementing it before that would be shipping
+on an assumption.
+
+### 6.6 Overfitting controls, applied identically to every rung
+
+| control | evidence for it |
+|---|---|
+| `epochs = 4` | validation loss bottoms out at epoch 1–2 in every seed |
+| `selection_metric = 'neg_val_loss'` | `selection_score` is 2/3 symptom metrics; it selected epoch 10 at 1.92× and 2.02× the minimum validation loss on two L4 seeds |
+| `early_stopping_patience = 2` | matched to where the minimum is |
+| `label_smoothing = 0.05` | ordinal heads only |
+| `freeze_encoder_layers` | available; verified to cut trainable parameters 6.82M → 0.19M on the test encoder |
+
+### 6.7 Significance testing
+
+`src/symptograph/significance.py` adds paired bootstrap tests and per-task
+confidence intervals, working from `predictions_{split}.npz` written by
+`train_one`, so no retraining is needed. QWK, AUROC (including ties) and masked
+macro F1 were checked to agree with scikit-learn **exactly** (< 1e-9).
+
+The headline finding from it: on the 74-row suicide-risk test split the 95%
+bootstrap CI for QWK is roughly **0.4 wide**. No architectural change of any
+plausible size is measurable on that split, and this should be reported as a
+property of the data rather than papered over.
+
+A difference is called significant only when it clears p < 0.05 on every seed
+**and** has the same sign on every seed; a per-seed p-value alone ignores
+training variance.

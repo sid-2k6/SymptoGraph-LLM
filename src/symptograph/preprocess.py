@@ -122,6 +122,27 @@ class Ontology:
     def columns(self) -> list[str]:
         return [self.col(s) for s in self.symptoms]
 
+    def instrument(self, symptom: str) -> str:
+        """Which clinical instrument a symptom is an item of.
+
+        9 of the 22 symptoms are PHQ-9 items, 7 are GAD-7 items and 6 are
+        extras. This matters because PHQ-9 severity is defined as a threshold
+        function of the sum of its item scores, which the monotone ordinal head
+        exploits, and because it is the grouping used to pool the labeller noise
+        channel for symptoms that have no gold labels.
+        """
+        for m in self.meta:
+            if m["name"] == symptom:
+                return m.get("instrument", "extra")
+        raise KeyError(symptom)
+
+    def instrument_groups(self) -> dict[str, list[int]]:
+        """Instrument name -> indices into ``symptoms``."""
+        groups: dict[str, list[int]] = {}
+        for i, s in enumerate(self.symptoms):
+            groups.setdefault(self.instrument(s), []).append(i)
+        return groups
+
 
 def _blank_symptoms(n: int, onto: Ontology) -> dict:
     """All symptoms unknown (-1) by default."""
