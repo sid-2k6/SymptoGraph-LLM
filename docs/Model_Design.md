@@ -478,3 +478,68 @@ property of the data rather than papered over.
 A difference is called significant only when it clears p < 0.05 on every seed
 **and** has the same sign on every seed; a per-seed p-value alone ignores
 training variance.
+
+### 6.8 First v2 result: overfitting fixed, N-A's main prediction falsified
+
+Four rungs, 3 seeds, 4 epochs, MentalRoBERTa, selection on validation loss.
+Mean ± std over seeds, validation at the selected epoch:
+
+| rung | best epochs | symptom F1 | symptom AUROC | sev QWK | risk QWK | composite |
+|---|---|---|---|---|---|---|
+| `M0_flat` | 2,2,2 | 0.761 ± 0.004 | 0.877 ± 0.002 | 0.445 ± 0.072 | 0.383 ± 0.078 | 0.529 ± 0.032 |
+| `M1_bottleneck` | 2,2,2 | 0.759 ± 0.003 | 0.874 ± 0.004 | **0.493 ± 0.018** | **0.398 ± 0.030** | **0.550 ± 0.017** |
+| `M2_monotone` | 3,2,2 | 0.775 ± 0.004 | **0.892 ± 0.005** | 0.438 ± 0.010 | 0.294 ± 0.057 | 0.502 ± 0.020 |
+| `M3_weak` | 2,3,3 | 0.774 ± 0.010 | 0.892 ± 0.006 | 0.410 ± 0.010 | 0.304 ± 0.007 | 0.496 ± 0.008 |
+
+**The overfitting controls worked.** Every seed now selects epoch 2–3 instead of
+8–10, and training risk QWK at the final epoch is 0.62 under the monotone head
+against 0.99–1.000 in v1. Seed standard deviations also collapsed: severity QWK
+0.072 → 0.010 and risk QWK 0.078 → 0.007 between `M0_flat` and `M3_weak`. The
+monotone constraint is doing real regularisation work.
+
+**N-A's central prediction is falsified.** §6.3 predicted risk QWK would gain
+most, because risk drops to 4 cutpoints on 340 rows. Instead:
+
+* symptom AUROC **+0.019** and F1 **+0.016** (consistent, sds ≤ 0.005)
+* severity QWK **−0.055**
+* risk QWK **−0.105**
+
+The mechanism is the shared trait, not the monotonicity. Forcing depression
+severity and suicide risk through **one scalar** `z` makes them the same ordering
+of patients, so the model cannot represent high depression severity with low
+suicide risk — and risk, as the task whose ordering differs most from severity,
+pays the larger price. The regularisation and interpretability came through; the
+single-axis assumption did not.
+
+`monotone_shared_trait=False` gives each ordinal task its own monotone trait
+over the same concepts, which keeps the instrument grounding, the capacity
+reduction and the item-loading readout while dropping the assumption that fails.
+It is recorded as a correction with a stated mechanism, not a tuning sweep, and
+the flag is in `ARCH_FIELDS` so the two variants cannot be silently mixed.
+
+**N3 remains flat** (`M2 → M3`: composite −0.007, AUROC +0.000), consistent with
+§3.13 — the 11 weak-only symptoms have no gold labels, so the metric set cannot
+credit it.
+
+**Best configuration so far is `M1_bottleneck`.** That has to be reported as it
+stands if the per-task variant does not beat it.
+
+### 6.9 Bug: forward correction crashed under autocast
+
+`F.binary_cross_entropy` raises under `torch.autocast` ("unsafe to autocast"),
+so `M4_denoised` died on its first weak batch. The CPU test suite missed it
+because autocast resolves to `None` without CUDA. The correction now converts
+the channel output back to a logit and uses
+`binary_cross_entropy_with_logits`, in float32.
+
+**Verified:** identical to the original formulation to 2.4e-7 with identical
+gradient norms, and a positive weak label on a symptom with tpr 0.9 / fpr 0.7
+produces a gradient of −0.0625 against −0.5 uncorrected, i.e. the correction
+discounts an over-called symptom to 12.5% of its uncorrected push.
+
+The fitted channel on the real labeller is itself a review deliverable:
+**tpr spans 0.25–0.94 and fpr spans 0.06–0.74 across the 11 measurable
+symptoms.** A symptom with tpr 0.25 means the labeller finds one true positive
+in four; fpr 0.74 means it claims presence in three of four genuine negatives.
+That is the quantitative form of review comment 5, and it is not something a
+single temperature can repair.
