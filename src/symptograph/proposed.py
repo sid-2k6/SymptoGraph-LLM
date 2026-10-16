@@ -166,7 +166,11 @@ class ProposedConfig:
     # cumulative-link model per ordinal task, so each task learns only its own
     # ordered cutpoints. Suicide risk then fits 4 numbers on 340 rows instead of
     # a whole head, and borrows strength from the 2,456 severity rows through z.
-    use_monotone_ordinal: bool = True
+    # Defaults to False so that no pre-existing configuration silently acquires
+    # a monotone head. The v1 ``LADDER`` entries do not mention this field, so a
+    # default of True would have changed the v1 architecture underneath
+    # notebooks 06 and 07. Every ``LADDER_V2`` rung sets it explicitly.
+    use_monotone_ordinal: bool = False
     # non-negative item weights make severity provably monotone in symptom
     # presence. False keeps the shared trait but drops the constraint - the
     # control that separates "structure helps" from "fewer parameters help".
@@ -273,6 +277,9 @@ CONDITIONAL_ARCH_FIELDS = {
 LEGACY_ARCH_DEFAULTS = {
     "monotone_shared_trait": True,   # the head had one shared trait when added
     "weak_as_stream": False,         # weak rows were concatenated
+    "use_monotone_ordinal": False,   # v1 had free Linear severity/risk heads
+    "use_noise_correction": False,   # v1 trained on raw weak labels
+    "freeze_encoder_layers": 0,      # v1 fine-tuned the whole encoder
 }
 
 
@@ -307,8 +314,16 @@ def fingerprint_changes(saved_hash: str, saved_fields: dict,
         if saved_fields.get(k) != now:
             changed[k] = (saved_fields.get(k), now)
     for k, old in saved_fields.items():
-        if k not in arch_fields and old is not None:
-            changed[k] = (old, None)
+        if k in arch_fields or old is None:
+            continue
+        if k in CONDITIONAL_ARCH_FIELDS:
+            # Absent from the current fields means the condition was false, i.e.
+            # the component is off for this run, so the stored value cannot
+            # describe anything about it. An actual switch-off is caught above
+            # by the unconditional flag that owns the component
+            # (e.g. use_monotone_ordinal), not by its sub-settings.
+            continue
+        changed[k] = (old, None)
     return changed
 
 

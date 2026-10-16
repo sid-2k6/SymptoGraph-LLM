@@ -543,3 +543,39 @@ symptoms.** A symptom with tpr 0.25 means the labeller finds one true positive
 in four; fpr 0.74 means it claims presence in three of four genuine negatives.
 That is the quantitative form of review comment 5, and it is not something a
 single temperature can repair.
+
+### 6.10 The resume guard, and a default that would have rewritten v1
+
+The guard compares an architecture fingerprint before loading a checkpoint. It
+has to satisfy two requirements that pull against each other: never resume into
+a different network, and never refuse a run the change cannot affect. Adding
+v2's fields broke the second requirement twice.
+
+1. `monotone_shared_trait` entered `ARCH_FIELDS` unconditionally, so every
+   existing checkpoint looked foreign — including `M0_flat`, which has no
+   monotone head. The error told the user to delete four finished rungs.
+2. Making those fields conditional then tripped the opposite check: a checkpoint
+   written when they *were* unconditional stores them, and the
+   "field we no longer send" branch reported that as a mismatch.
+
+**Fix.** `CONDITIONAL_ARCH_FIELDS` scopes a field to the component that owns it,
+so it only enters the fingerprint when that component is on.
+`LEGACY_ARCH_DEFAULTS` records what the code did before each field existed, so a
+checkpoint that predates a field is compatible with a run requesting that value.
+A field absent from the current fingerprint is ignored on the stored side as
+well, because its component is off — an actual switch-off is caught by the
+unconditional flag that owns it (`use_monotone_ordinal`), not by its
+sub-settings.
+
+**The more serious find.** `use_monotone_ordinal` defaulted to `True`. The v1
+`LADDER` entries never mention it, so re-running notebook 06 or 07 would have
+given every v1 rung a monotone head while still calling it `L0_flat`,
+`L1_bottleneck` and so on — silently replacing the results in §6.8 and the ones
+cited in §5. The default is now `False`, and every `LADDER_V2` rung sets the
+field explicitly.
+
+`tests/test_fingerprint.py` pins all of it: 52 cases covering each shipped
+fingerprint format, every rung in both ladders, the concatenated and streamed
+weak paths, and the changes that must still be refused. A pre-v2 checkpoint is
+asserted to resume for `M0_flat`/`M1_bottleneck` — architecturally unchanged —
+and to be refused for `M2`-`M4`, whose weights it cannot contain.
