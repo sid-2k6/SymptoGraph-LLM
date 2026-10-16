@@ -173,6 +173,13 @@ class ProposedConfig:
     monotone_nonneg: bool = True
     # a small unconstrained term added to z, so the head is not strictly additive
     monotone_residual: bool = True
+    # True puts depression severity AND suicide risk on ONE latent trait. The
+    # first v2 run shows that is too strong: symptom AUROC rose +0.019 but
+    # severity QWK fell 0.055 and risk QWK fell 0.105, because a single scalar
+    # cannot represent high depression severity with low suicide risk. False
+    # gives each ordinal task its own monotone trait, keeping the instrument
+    # grounding and the regularisation without the single-axis constraint.
+    monotone_shared_trait: bool = True
 
     # ---- N-B: per-symptom noise channel on the weak labels ----------------- #
     # A single confidence temperature cannot fix systematic bias: the labeller
@@ -246,7 +253,8 @@ ARCH_FIELDS = ("max_length", "encoder_name", "encoder_fallback", "graph_dim",
                "graph_layers", "use_bottleneck", "use_graph", "use_uncertainty",
                "use_contrastive", "dropout", "concept_gated_pooling",
                "uncertainty_detached", "use_monotone_ordinal",
-               "monotone_nonneg", "monotone_residual", "use_noise_correction",
+               "monotone_nonneg", "monotone_residual", "monotone_shared_trait",
+               "use_noise_correction",
                "freeze_encoder_layers")
 
 
@@ -639,12 +647,16 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
             if self.monotone:
                 # one item weight per symptom; softplus keeps it non-negative so
                 # z cannot fall when a symptom turns on
+                # one trait shared by both ordinal tasks, or one trait each
+                self.ord_tasks = ("severity", "risk")
+                n_traits = 1 if cfg.monotone_shared_trait else len(self.ord_tasks)
+                self.n_traits = n_traits
                 # init so that z lands near the initial cutpoints instead of
                 # saturating the top class: softplus(-3) ~ 0.049, and about half
                 # the 22 concepts fire at init, giving z ~ 0.5 against
                 # tau ~ [0, 0.69, 1.39]
                 self.item_w = nn.Parameter(torch.full(
-                    (K,), -3.0 if cfg.monotone_nonneg else 1.0 / K))
+                    (n_traits, K), -3.0 if cfg.monotone_nonneg else 1.0 / K))
                 # ordered cutpoints per task, parameterised as a first cut plus
                 # positive increments, so tau_1 < tau_2 < ... by construction
                 self.cut0 = nn.ParameterDict({
@@ -653,9 +665,9 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
                 self.cut_inc = nn.ParameterDict({
                     "severity": nn.Parameter(torch.zeros(N_SEVERITY - 2)),
                     "risk": nn.Parameter(torch.zeros(N_RISK - 2))})
-                self.z_scale = nn.Parameter(torch.ones(1))
+                self.z_scale = nn.Parameter(torch.ones(n_traits))
                 if cfg.monotone_residual:
-                    self.z_residual = nn.Linear(self.head_in, 1)
+                    self.z_residual = nn.Linear(self.head_in, n_traits)
             else:
                 self.severity = nn.Linear(self.head_in, N_SEVERITY)
                 self.risk = nn.Linear(self.head_in, N_RISK)
@@ -748,14 +760,17 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
 
             if self.monotone:
                 w = (torch.nn.functional.softplus(self.item_w)
-                     if self.cfg.monotone_nonneg else self.item_w)
-                z = (out["concepts"] * w.unsqueeze(0)).sum(-1) * self.z_scale
+                     if self.cfg.monotone_nonneg else self.item_w)   # T,K
+                Z = (torch.einsum("bk,tk->bt", out["concepts"], w)
+                     * self.z_scale.unsqueeze(0))                    # B,T
                 if self.cfg.monotone_residual:
-                    z = z + self.z_residual(feat).squeeze(-1)
-                out["latent_trait"] = z
+                    Z = Z + self.z_residual(feat)
+                out["latent_trait"] = Z
                 out["item_weights"] = w
-                for key, n_cls in (("severity", N_SEVERITY), ("risk", N_RISK)):
-                    out[key] = self._ordinal_logits(z, key, n_cls)
+                for i, (key, n_cls) in enumerate((("severity", N_SEVERITY),
+                                                  ("risk", N_RISK))):
+                    col = 0 if self.n_traits == 1 else i
+                    out[key] = self._ordinal_logits(Z[:, col], key, n_cls)
             else:
                 out["severity"] = self.severity(feat)
                 out["risk"] = self.risk(feat)
@@ -842,11 +857,18 @@ def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig,
             # that against the noisy label. A symptom the labeller over-calls
             # (high false-positive rate) therefore stops dragging p upward.
             tpr, fpr = noise_channel
-            p = torch.sigmoid(logits)
             t = tpr.unsqueeze(0).expand_as(y)[valid]
             f = fpr.unsqueeze(0).expand_as(y)[valid]
-            p_obs = (p * t + (1.0 - p) * f).clamp(1e-6, 1.0 - 1e-6)
-            bce = F.binary_cross_entropy(p_obs, target, reduction="none")
+            # float32 throughout: p_obs is a probability, and under bf16/fp16
+            # autocast the logs below lose too much precision near the clamps.
+            p = torch.sigmoid(logits.float())
+            p_obs = (p * t.float() + (1.0 - p) * f.float()).clamp(1e-6, 1 - 1e-6)
+            # Back to a logit so this goes through binary_cross_entropy_WITH_LOGITS.
+            # Plain binary_cross_entropy raises under autocast ("unsafe to
+            # autocast") because it has no numerically stable fused path.
+            logit_obs = torch.log(p_obs) - torch.log1p(-p_obs)
+            bce = F.binary_cross_entropy_with_logits(
+                logit_obs, target.float(), reduction="none")
         else:
             bce = F.binary_cross_entropy_with_logits(logits, target,
                                                      reduction="none")
