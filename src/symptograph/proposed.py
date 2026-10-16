@@ -63,6 +63,53 @@ LADDER: list[tuple[str, dict]] = [
 LADDER_ORDER = [name for name, _ in LADDER]
 FULL_MODEL = "L5_full"
 
+# --------------------------------------------------------------------------- #
+# v2 ladder
+# --------------------------------------------------------------------------- #
+# Contrastive (old N5) and uncertainty (old N6) are dropped: both measured at or
+# below seed noise over two full runs, and uncertainty's hypothesis was already
+# recorded as wrong in Model_Design.md 3.4. The graph (old N2) is demoted from a
+# headline novelty to a controlled ablation, because L1 -> L2 (0.549 -> 0.571,
+# sds 0.027 and 0.015) does not clear seed noise and the prior is hand-authored.
+#
+# In their place: a monotone instrument-grounded ordinal head (N-A) and a
+# per-symptom noise channel on the weak labels (N-B). Both REDUCE effective
+# capacity or correct supervision rather than adding parameters, which is the
+# only kind of change that can help a model whose training risk QWK already
+# reaches 1.000 while validation sits near 0.40.
+LADDER_V2: list[tuple[str, dict]] = [
+    ("M0_flat", dict(use_bottleneck=False, use_graph=False, use_weak=False,
+                     use_monotone_ordinal=False, use_noise_correction=False)),
+    ("M1_bottleneck", dict(use_bottleneck=True, use_graph=False, use_weak=False,
+                           use_monotone_ordinal=False, use_noise_correction=False)),
+    ("M2_monotone", dict(use_bottleneck=True, use_graph=False, use_weak=False,
+                         use_monotone_ordinal=True, use_noise_correction=False)),
+    ("M3_weak", dict(use_bottleneck=True, use_graph=False, use_weak=True,
+                     use_monotone_ordinal=True, use_noise_correction=False)),
+    ("M4_denoised", dict(use_bottleneck=True, use_graph=False, use_weak=True,
+                         use_monotone_ordinal=True, use_noise_correction=True)),
+]
+LADDER_V2_ORDER = [name for name, _ in LADDER_V2]
+FULL_MODEL_V2 = "M4_denoised"
+
+# Controls, run separately from the ladder. Each isolates one claim.
+CONTROLS_V2: list[tuple[str, dict]] = [
+    # does the graph beat no graph, on top of the full model?
+    ("C_graph", dict(use_bottleneck=True, use_graph=True, use_weak=True,
+                     use_monotone_ordinal=True, use_noise_correction=True)),
+    # is the monotone head winning because of structure, or just fewer params?
+    # this keeps the shared latent trait but drops the non-negativity constraint
+    ("C_monotone_unconstrained",
+     dict(use_bottleneck=True, use_graph=False, use_weak=True,
+          use_monotone_ordinal=True, monotone_nonneg=False,
+          use_noise_correction=True)),
+    # does denoising beat simply down-weighting the weak labels uniformly?
+    ("C_weak_downweight",
+     dict(use_bottleneck=True, use_graph=False, use_weak=True,
+          use_monotone_ordinal=True, use_noise_correction=False,
+          weak_stream_weight=0.5)),
+]
+
 
 @dataclass
 class ProposedConfig:
@@ -111,6 +158,38 @@ class ProposedConfig:
     # concept logits. A bare 22-dim bottleneck starves the severity head, which
     # saw 768 dims in the flat rung. Set False for the strict-bottleneck ablation.
     concept_gated_pooling: bool = True
+    # ---- N-A: instrument-grounded monotone ordinal head -------------------- #
+    # PHQ-9 severity is defined as a threshold function of the sum of its nine
+    # item scores, and 9 of the 22 symptoms ARE those items (7 more are GAD-7).
+    # The free Linear(head_in, 4) severity head threw that away. Instead a single
+    # latent distress trait z = sum_k softplus(v_k) * sigma(c_k) feeds a
+    # cumulative-link model per ordinal task, so each task learns only its own
+    # ordered cutpoints. Suicide risk then fits 4 numbers on 340 rows instead of
+    # a whole head, and borrows strength from the 2,456 severity rows through z.
+    use_monotone_ordinal: bool = True
+    # non-negative item weights make severity provably monotone in symptom
+    # presence. False keeps the shared trait but drops the constraint - the
+    # control that separates "structure helps" from "fewer parameters help".
+    monotone_nonneg: bool = True
+    # a small unconstrained term added to z, so the head is not strictly additive
+    monotone_residual: bool = True
+
+    # ---- N-B: per-symptom noise channel on the weak labels ----------------- #
+    # A single confidence temperature cannot fix systematic bias: the labeller
+    # calls low_self_esteem at 0.80 where gold prevalence is 0.24. Instead model
+    # the labeller as a per-symptom channel P(noisy | clean) and train the clean
+    # probability through it (forward correction).
+    use_noise_correction: bool = False
+    # written by scripts/fit_noise_channel.py from weak_labels/validation_labels.jsonl
+    noise_channel_path: str | None = None
+
+    # ---- overfitting controls ---------------------------------------------- #
+    # Validation loss bottoms out at epoch 1-2 in every seed while train risk QWK
+    # reaches 1.000 by epoch 6. Freezing the lower encoder layers is the cheapest
+    # real regulariser at 12,911 training rows.
+    freeze_encoder_layers: int = 0
+    # applied to the ordinal cross-entropies only
+    label_smoothing: float = 0.0
     # class imbalance; 0 disables
     pos_weight_cap: float = 10.0
     # Depression severity is 72% "minimum" (1767/205/288/196) and risk is
@@ -166,7 +245,9 @@ ARCH_VERSION = 5
 ARCH_FIELDS = ("max_length", "encoder_name", "encoder_fallback", "graph_dim",
                "graph_layers", "use_bottleneck", "use_graph", "use_uncertainty",
                "use_contrastive", "dropout", "concept_gated_pooling",
-               "uncertainty_detached")
+               "uncertainty_detached", "use_monotone_ordinal",
+               "monotone_nonneg", "monotone_residual", "use_noise_correction",
+               "freeze_encoder_layers")
 
 
 def architecture_fingerprint(rung: str, cfg: ProposedConfig, onto: Ontology) -> tuple:
@@ -377,6 +458,73 @@ def normalise_adjacency(A):
     return d.unsqueeze(1) * A * d.unsqueeze(0)
 
 
+def load_noise_channel(path: str | None, onto: Ontology, device, verbose=True):
+    """Per-symptom labeller channel ``(tpr, fpr)`` as two K-vectors.
+
+    ``tpr[k] = P(LLM says present | symptom truly present)`` and
+    ``fpr[k] = P(LLM says present | truly absent)``, estimated by
+    ``scripts/fit_noise_channel.py`` from the gold-labelled symptoms.
+
+    The 11 weak-only symptoms have no gold labels, so their channel is **not
+    identifiable**. The fitting script pools those by instrument and records
+    that it did; this loader warns about it rather than letting it pass
+    silently, because it is an assumption the paper has to state.
+    """
+    import torch
+    K = len(onto.symptoms)
+    if not path or not os.path.exists(path):
+        raise FileNotFoundError(
+            f"use_noise_correction=True needs a fitted channel, got {path!r}.\n"
+            "Run: python scripts/fit_noise_channel.py "
+            "--validation <weak_labels>/validation_labels.jsonl "
+            "--labelled <processed>/labelled.parquet --out <weak_labels>/noise_channel.json")
+    ch = read_json(path)
+    per = ch["per_symptom"]
+    tpr = torch.tensor([per[s]["tpr"] for s in onto.symptoms], dtype=torch.float32)
+    fpr = torch.tensor([per[s]["fpr"] for s in onto.symptoms], dtype=torch.float32)
+    if verbose:
+        measured = [s for s in onto.symptoms if per[s].get("source") == "measured"]
+        pooled = [s for s in onto.symptoms if per[s].get("source") != "measured"]
+        print(f"  noise channel: {len(measured)} symptoms measured against gold, "
+              f"{len(pooled)} pooled/assumed")
+        print(f"    tpr {tpr.min():.2f}-{tpr.max():.2f} | "
+              f"fpr {fpr.min():.2f}-{fpr.max():.2f}")
+        if pooled:
+            print(f"    ASSUMED (no gold labels exist): {', '.join(pooled[:6])}"
+                  f"{' ...' if len(pooled) > 6 else ''}")
+    # A channel with tpr <= fpr carries no signal about that symptom; clamp so
+    # the correction cannot invert the label.
+    tpr = torch.maximum(tpr, fpr + 0.05).clamp(max=0.99)
+    return tpr.to(device), fpr.clamp(min=0.01).to(device)
+
+
+def freeze_lower_layers(encoder, n: int, verbose: bool = True) -> int:
+    """Freeze the embeddings and the lowest ``n`` transformer blocks.
+
+    The cheapest real regulariser at 12,911 training rows: validation loss
+    currently bottoms out at epoch 1-2 while training risk QWK reaches 1.000.
+    Returns the number of frozen parameters.
+    """
+    if n <= 0:
+        return 0
+    frozen = 0
+    emb = getattr(encoder, "embeddings", None)
+    if emb is not None:
+        for prm in emb.parameters():
+            prm.requires_grad = False
+            frozen += prm.numel()
+    layers = getattr(getattr(encoder, "encoder", None), "layer", None)
+    if layers is not None:
+        for block in layers[:n]:
+            for prm in block.parameters():
+                prm.requires_grad = False
+                frozen += prm.numel()
+    if verbose:
+        print(f"  froze embeddings + lowest {n} encoder blocks "
+              f"({frozen / 1e6:.1f}M parameters)")
+    return frozen
+
+
 def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None):
     import torch
     import torch.nn as nn
@@ -484,8 +632,33 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
             else:
                 self.head_in = D                   # flat: straight from the encoder
                 self.flat_symptoms = nn.Linear(D, K)
-            self.severity = nn.Linear(self.head_in, N_SEVERITY)
-            self.risk = nn.Linear(self.head_in, N_RISK)
+            # ---- N-A: instrument-grounded monotone ordinal head
+            # Needs the concept vector, so it is only available with the
+            # bottleneck; the flat rung keeps free heads as the control.
+            self.monotone = cfg.use_monotone_ordinal and cfg.use_bottleneck
+            if self.monotone:
+                # one item weight per symptom; softplus keeps it non-negative so
+                # z cannot fall when a symptom turns on
+                # init so that z lands near the initial cutpoints instead of
+                # saturating the top class: softplus(-3) ~ 0.049, and about half
+                # the 22 concepts fire at init, giving z ~ 0.5 against
+                # tau ~ [0, 0.69, 1.39]
+                self.item_w = nn.Parameter(torch.full(
+                    (K,), -3.0 if cfg.monotone_nonneg else 1.0 / K))
+                # ordered cutpoints per task, parameterised as a first cut plus
+                # positive increments, so tau_1 < tau_2 < ... by construction
+                self.cut0 = nn.ParameterDict({
+                    "severity": nn.Parameter(torch.zeros(1)),
+                    "risk": nn.Parameter(torch.zeros(1))})
+                self.cut_inc = nn.ParameterDict({
+                    "severity": nn.Parameter(torch.zeros(N_SEVERITY - 2)),
+                    "risk": nn.Parameter(torch.zeros(N_RISK - 2))})
+                self.z_scale = nn.Parameter(torch.ones(1))
+                if cfg.monotone_residual:
+                    self.z_residual = nn.Linear(self.head_in, 1)
+            else:
+                self.severity = nn.Linear(self.head_in, N_SEVERITY)
+                self.risk = nn.Linear(self.head_in, N_RISK)
             self.stress = nn.Linear(self.head_in, 1)
 
             # ---- N5: contrastive projection
@@ -499,6 +672,28 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
 
         def adjacency(self):
             return normalise_adjacency(self.A0 + self.delta)
+
+        def cutpoints(self, key: str):
+            """Strictly increasing thresholds for one ordinal task."""
+            inc = torch.nn.functional.softplus(self.cut_inc[key]) + 1e-3
+            return torch.cat([self.cut0[key], self.cut0[key] + inc.cumsum(0)])
+
+        def _ordinal_logits(self, z, key: str, n_cls: int):
+            """Cumulative-link class log-probabilities from the latent trait.
+
+            ``P(y >= j) = sigmoid(z - tau_j)``, differenced into class
+            probabilities. Returns ``log p`` rather than probabilities, because
+            ``cross_entropy`` applies ``log_softmax`` and ``log_softmax(log p)``
+            leaves ``log p`` unchanged when ``p`` sums to one - so the existing
+            loss and metric code needs no special case.
+            """
+            tau = self.cutpoints(key)                      # n_cls-1
+            ge = torch.sigmoid(z.unsqueeze(-1) - tau.unsqueeze(0))   # B,n_cls-1
+            ones = torch.ones_like(ge[:, :1])
+            zeros = torch.zeros_like(ge[:, :1])
+            upper = torch.cat([ones, ge], dim=-1)          # P(y >= j),   j=0..n-1
+            lower = torch.cat([ge, zeros], dim=-1)         # P(y >= j+1), j=0..n-1
+            return (upper - lower).clamp(min=1e-7).log()
 
         def forward(self, batch):
             mask = batch["attention_mask"]
@@ -551,8 +746,19 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
                 out.update(symptoms=c_logit, concepts=torch.sigmoid(c_logit))
                 feat = self.drop(feat)
 
-            out["severity"] = self.severity(feat)
-            out["risk"] = self.risk(feat)
+            if self.monotone:
+                w = (torch.nn.functional.softplus(self.item_w)
+                     if self.cfg.monotone_nonneg else self.item_w)
+                z = (out["concepts"] * w.unsqueeze(0)).sum(-1) * self.z_scale
+                if self.cfg.monotone_residual:
+                    z = z + self.z_residual(feat).squeeze(-1)
+                out["latent_trait"] = z
+                out["item_weights"] = w
+                for key, n_cls in (("severity", N_SEVERITY), ("risk", N_RISK)):
+                    out[key] = self._ordinal_logits(z, key, n_cls)
+            else:
+                out["severity"] = self.severity(feat)
+                out["risk"] = self.risk(feat)
             out["stress"] = self.stress(feat).squeeze(-1)
             if self.cfg.use_contrastive:
                 out["projection"] = torch.nn.functional.normalize(
@@ -602,7 +808,8 @@ def class_weights(values: np.ndarray, n_classes: int, cap: float = 10.0):
 
 
 def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig,
-                 pos_weight=None, ordinal_weights=None, weak_pass: bool = False):
+                 pos_weight=None, ordinal_weights=None, weak_pass: bool = False,
+                 noise_channel=None):
     """Multi-task loss. ``weak_pass`` restricts it to the symptom terms.
 
     On a weak batch severity, risk and stress are all NaN and would mask out
@@ -629,7 +836,20 @@ def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig,
         if pos_weight is not None:
             pw = pos_weight.unsqueeze(0).expand_as(y)[valid]
             weight = weight * torch.where(target > 0.5, pw, torch.ones_like(pw))
-        bce = F.binary_cross_entropy_with_logits(logits, target, reduction="none")
+        if weak_pass and cfg.use_noise_correction and noise_channel is not None:
+            # N-B forward correction. The network predicts the CLEAN probability
+            # p; we push it through the labeller's per-symptom channel and score
+            # that against the noisy label. A symptom the labeller over-calls
+            # (high false-positive rate) therefore stops dragging p upward.
+            tpr, fpr = noise_channel
+            p = torch.sigmoid(logits)
+            t = tpr.unsqueeze(0).expand_as(y)[valid]
+            f = fpr.unsqueeze(0).expand_as(y)[valid]
+            p_obs = (p * t + (1.0 - p) * f).clamp(1e-6, 1.0 - 1e-6)
+            bce = F.binary_cross_entropy(p_obs, target, reduction="none")
+        else:
+            bce = F.binary_cross_entropy_with_logits(logits, target,
+                                                     reduction="none")
         l = (bce * weight).sum() / weight.sum().clamp(min=1e-6)
         total = total + cfg.task_weights["symptoms"] * l
         parts["symptoms"] = float(l.detach())
@@ -654,7 +874,11 @@ def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig,
         m = ~torch.isnan(t)
         if m.any():
             cw = (ordinal_weights or {}).get(key)
-            l = F.cross_entropy(out[key][m], t[m].long(), weight=cw)
+            # out[key] holds log-probabilities under the monotone head and raw
+            # logits otherwise; log_softmax is a no-op on normalised log-probs,
+            # so cross_entropy is correct either way.
+            l = F.cross_entropy(out[key][m], t[m].long(), weight=cw,
+                                label_smoothing=cfg.label_smoothing)
             total = total + cfg.task_weights[key] * l
             parts[key] = float(l.detach())
 
@@ -689,7 +913,7 @@ def cycle_loader(loader):
 
 
 def _add_weak_term(loss, model, cfg, pos_weight, ordinal_weights, weak_iter,
-                   device, train, step):
+                   device, train, step, noise_channel=None):
     """Add the auxiliary weak-label symptom loss to ``loss`` for one step.
 
     Returns ``(loss, weak_loss_value_or_None)``. Runs inside the caller's
@@ -705,14 +929,14 @@ def _add_weak_term(loss, model, cfg, pos_weight, ordinal_weights, weak_iter,
     wb = {k: (v.to(device) if hasattr(v, "to") else v) for k, v in wb.items()}
     wout = model(wb)
     wloss, _ = compute_loss(wout, wb, model, cfg, pos_weight, ordinal_weights,
-                            weak_pass=True)
+                            weak_pass=True, noise_channel=noise_channel)
     return loss + cfg.weak_stream_weight * wloss, float(wloss.detach())
 
 
 def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=None,
               device="cpu", train: bool = True, amp_dtype=None,
               pos_weight=None, thresholds=None, ordinal_weights=None,
-              weak_iter=None):
+              weak_iter=None, noise_channel=None):
     import torch
 
     model.train() if train else model.eval()
@@ -733,14 +957,14 @@ def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=N
                                            ordinal_weights)
                     loss, wl = _add_weak_term(loss, model, cfg, pos_weight,
                                               ordinal_weights, weak_iter, device,
-                                              train, step)
+                                              train, step, noise_channel)
             else:
                 out = model(batch)
                 loss, _ = compute_loss(out, batch, model, cfg, pos_weight,
                                        ordinal_weights)
                 loss, wl = _add_weak_term(loss, model, cfg, pos_weight,
                                           ordinal_weights, weak_iter, device,
-                                          train, step)
+                                          train, step, noise_channel)
         if wl is not None:
             weak_loss_sum += wl
             weak_steps += 1
@@ -786,6 +1010,10 @@ def run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None, scaler=N
     return total_loss / max(n, 1), bundle, selective, {
         "symptom_prob": 1 / (1 + np.exp(-preds["symptoms"])),
         "symptoms": targets["symptoms"],
+        "severity_pred": preds["severity"], "severity_true": targets["severity"],
+        "risk_pred": preds["risk"], "risk_true": targets["risk"],
+        "stress_prob": 1 / (1 + np.exp(-preds["stress"])),
+        "stress_true": targets["stress"],
         # Logged so the weak stream can be confirmed to have actually run, and
         # its loss tracked separately from the gold objective.
         "weak_loss": (weak_loss_sum / weak_steps) if weak_steps else None,
@@ -847,6 +1075,9 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
     model, tokenizer = build_model(cfg, onto, graph)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
+    # must precede the optimiser, which skips parameters with requires_grad=False
+    if cfg.freeze_encoder_layers:
+        freeze_lower_layers(model.encoder, cfg.freeze_encoder_layers, verbose)
 
     collate = make_collate(tokenizer, cfg.max_length)
     loaders = {
@@ -903,6 +1134,11 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
                 print(f"  {k} class weights: "
                       f"{[round(float(x), 2) for x in v.tolist()]}")
 
+    noise_channel = None
+    if cfg.use_noise_correction:
+        noise_channel = load_noise_channel(cfg.noise_channel_path, onto, device,
+                                           verbose=verbose)
+
     amp_dtype, scaler = resolve_amp(cfg, device)
     if verbose and amp_dtype is not None:
         print(f"  autocast: {str(amp_dtype).replace('torch.', '')}"
@@ -957,13 +1193,20 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
         tr_loss, tr_bundle, _, tr_extra = run_epoch(
             model, loaders["train"], cfg, onto, optimizer, scheduler, scaler,
             device, True, amp_dtype=amp_dtype, pos_weight=pos_weight,
-            ordinal_weights=ordinal_weights,
+            ordinal_weights=ordinal_weights, noise_channel=noise_channel,
             weak_iter=cycle_loader(weak_loader) if weak_loader else None)
         va_loss, va_bundle, va_sel, _ = run_epoch(
             model, loaders["val"], cfg, onto, device=device, train=False,
             amp_dtype=amp_dtype, pos_weight=pos_weight,
             ordinal_weights=ordinal_weights)
-        score = va_bundle.get(cfg.selection_metric)
+        # "neg_val_loss" selects the epoch with the LOWEST validation loss.
+        # selection_score is mean(symptom F1, symptom AUROC, severity QWK): two
+        # of three terms are symptom metrics that keep climbing while the
+        # ordinal heads memorise, so it picked epoch 10 at ~2x the minimum
+        # validation loss on two seeds. Validation loss weights the tasks the
+        # way training does and cannot be gamed by one saturating task.
+        score = (-va_loss if cfg.selection_metric == "neg_val_loss"
+                 else va_bundle.get(cfg.selection_metric))
         score = -math.inf if score is None else score
         improved = score > best_score
         secs = time.time() - t0
@@ -1036,12 +1279,18 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
 
     finals, selectives = {}, {}
     for split in ("val", "test"):
-        _, bundle, sel, _ = run_epoch(model, loaders[split], cfg, onto,
-                                      device=device, train=False,
-                                      amp_dtype=amp_dtype, thresholds=thresholds)
+        _, bundle, sel, extra = run_epoch(model, loaders[split], cfg, onto,
+                                          device=device, train=False,
+                                          amp_dtype=amp_dtype, thresholds=thresholds)
         finals[split] = bundle
         if sel:
             selectives[split] = sel
+        # Per-example predictions, so a PAIRED bootstrap across seeds is possible
+        # later without retraining. Aggregate metrics alone cannot support a
+        # significance test, which the review asked for.
+        np.savez_compressed(
+            os.path.join(out_dir, f"predictions_{split}.npz"),
+            **{k: v for k, v in extra.items() if isinstance(v, np.ndarray)})
 
     if best_train_bundle is None:
         cached = os.path.join(out_dir, "best_train_metrics.json")
@@ -1068,7 +1317,8 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
         "device": device, "config": asdict(cfg),
         "components": {k: getattr(cfg, k) for k in
                        ("use_bottleneck", "use_graph", "use_weak",
-                        "use_contrastive", "use_uncertainty")},
+                        "use_contrastive", "use_uncertainty",
+                        "use_monotone_ordinal", "use_noise_correction")},
         "splits": {k: len(frames[k]["text"]) for k in frames},
         "n_weak_rows": frames["train"]["n_weak_rows"],
         "train": finals["train"], "val": finals["val"], "test": finals["test"],
@@ -1137,11 +1387,17 @@ def run_rung(rung: str, flags: dict, cfg: ProposedConfig, processed_dir: str,
 
 def run_ladder(cfg: ProposedConfig, processed_dir: str, graph_dir: str | None,
                root: str, rungs=None, onto: Ontology | None = None,
-               resume: bool = True, verbose: bool = True) -> dict:
-    """Train the whole ladder, or the subset named in ``rungs``."""
+               resume: bool = True, verbose: bool = True, ladder=None) -> dict:
+    """Train a ladder, or the subset named in ``rungs``.
+
+    ``ladder`` defaults to the v1 ``LADDER``; pass ``LADDER_V2`` for the revised
+    model. Keeping both callable from one function means the two generations
+    share every piece of the training, checkpointing and logging path.
+    """
     onto = onto or Ontology.load()
     os.makedirs(root, exist_ok=True)
-    selected = [(n, f) for n, f in LADDER if rungs is None or n in rungs]
+    ladder = LADDER if ladder is None else ladder
+    selected = [(n, f) for n, f in ladder if rungs is None or n in rungs]
     results = {}
     for name, flags in selected:
         if verbose:
