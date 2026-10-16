@@ -1250,6 +1250,16 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
 
     write_json(os.path.join(out_dir, "config.json"),
                {"rung": rung, "seed": seed, "device": device,
+                # amp_dtype="auto" resolves differently per GPU: bfloat16 on an
+                # L4 or A100, float16 plus a gradient scaler on a T4, which does
+                # not support bf16. Recording only "auto" left the actual
+                # numerics of a run unknowable, so a ladder split across GPU
+                # types looked uniform when it was not.
+                "amp_dtype_resolved": (None if amp_dtype is None else
+                                       str(amp_dtype).replace("torch.", "")),
+                "grad_scaler": scaler is not None,
+                "gpu": (torch.cuda.get_device_name(0)
+                        if device == "cuda" else None),
                    "encoder": model.loaded_name,
                    "encoder_requested": model.encoder_requested,
                    "encoder_fallback_used": model.encoder_fallback_used,
