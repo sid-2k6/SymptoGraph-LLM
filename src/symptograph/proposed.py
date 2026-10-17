@@ -194,6 +194,9 @@ class ProposedConfig:
     # gives each ordinal task its own monotone trait, keeping the instrument
     # grounding and the regularisation without the single-axis constraint.
     monotone_shared_trait: bool = True
+    # Initial gap between ordinal cutpoints. Below ~2.2 the interior classes of
+    # a cumulative-link head can never be the most likely class; see CUT_SPACING.
+    cut_spacing: float = CUT_SPACING
 
     # ---- N-B: per-symptom noise channel on the weak labels ----------------- #
     # A single confidence temperature cannot fix systematic bias: the labeller
@@ -219,7 +222,13 @@ class ProposedConfig:
     ordinal_class_weights: bool = True
     # per-symptom decision thresholds tuned on validation, applied to test
     tune_thresholds: bool = True
-    scheduler: str = "cosine"
+    # "linear" or "cosine", both with warmup. This field was previously IGNORED:
+    # train_one always built get_linear_schedule_with_warmup while the default
+    # said "cosine", so every run in this project so far - v1 and v2 - used
+    # LINEAR warmup and decay while the notebooks and Model_Design.md claimed
+    # cosine. The default is set to "linear" so the documentation now matches
+    # the results that already exist; pass "cosine" to opt in deliberately.
+    scheduler: str = "linear"
     early_stopping_patience: int = 4
 
     task_weights: dict = field(default_factory=lambda: {
@@ -267,7 +276,7 @@ ARCH_FIELDS = ("max_length", "encoder_name", "encoder_fallback", "graph_dim",
                "graph_layers", "use_bottleneck", "use_graph", "use_uncertainty",
                "use_contrastive", "dropout", "concept_gated_pooling",
                "uncertainty_detached", "use_monotone_ordinal",
-               "use_noise_correction", "freeze_encoder_layers")
+               "use_noise_correction", "freeze_encoder_layers", "scheduler")
 
 # Fields that only describe a component, and so only belong in the fingerprint
 # when that component is switched on. Including them unconditionally refuses to
@@ -278,6 +287,11 @@ CONDITIONAL_ARCH_FIELDS = {
     "monotone_nonneg": lambda c: c.use_monotone_ordinal and c.use_bottleneck,
     "monotone_residual": lambda c: c.use_monotone_ordinal and c.use_bottleneck,
     "monotone_shared_trait": lambda c: c.use_monotone_ordinal and c.use_bottleneck,
+    # The cutpoint spacing is an initialisation, not a shape, so changing it left
+    # the fingerprint identical - a resumed run would silently keep weights from
+    # the version whose interior classes were unreachable. Spacing is therefore
+    # part of the identity of a monotone run.
+    "cut_spacing": lambda c: c.use_monotone_ordinal and c.use_bottleneck,
 }
 
 # Fields introduced after some runs had already been trained. A checkpoint from
@@ -290,6 +304,8 @@ LEGACY_ARCH_DEFAULTS = {
     "use_monotone_ordinal": False,   # v1 had free Linear severity/risk heads
     "use_noise_correction": False,   # v1 trained on raw weak labels
     "freeze_encoder_layers": 0,      # v1 fine-tuned the whole encoder
+    "scheduler": "linear",           # the field was ignored; linear always ran
+    "cut_spacing": 2.5,              # the spacing shipped with the fixed head
 }
 
 
@@ -741,14 +757,14 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
                 self.cut_inc = nn.ParameterDict()
                 for task, n_cls in (("severity", N_SEVERITY), ("risk", N_RISK)):
                     self.cut0[task] = nn.Parameter(
-                        torch.tensor([(1.0 - (n_cls - 1) / 2.0) * CUT_SPACING]))
+                        torch.tensor([(1.0 - (n_cls - 1) / 2.0) * cfg.cut_spacing]))
                     self.cut_inc[task] = nn.Parameter(torch.full(
-                        (n_cls - 2,), _softplus_inv(CUT_SPACING)))
+                        (n_cls - 2,), _softplus_inv(cfg.cut_spacing)))
 
                 # z = z_scale * (z_raw - 0.5) must be able to traverse the whole
                 # cutpoint span, which is (n_cls-1)*CUT_SPACING wide. z_raw lies
                 # in [0, 1], so the scale has to be at least that span.
-                span = (max(N_SEVERITY, N_RISK) - 1) * CUT_SPACING
+                span = (max(N_SEVERITY, N_RISK) - 1) * cfg.cut_spacing
                 self.z_scale = nn.Parameter(torch.full((n_traits,), span * 1.2))
                 if cfg.monotone_residual:
                     self.z_residual = nn.Linear(self.head_in, n_traits)
@@ -1220,8 +1236,17 @@ def train_one(rung: str, seed: int, cfg: ProposedConfig, processed_dir: str,
          {"params": head_params, "lr": cfg.head_lr}],
         weight_decay=cfg.weight_decay)
     steps = max(len(loaders["train"]), 1) * cfg.epochs
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer, int(cfg.warmup_ratio * steps), steps)
+    warm = int(cfg.warmup_ratio * steps)
+    if cfg.scheduler == "cosine":
+        from transformers import get_cosine_schedule_with_warmup
+        scheduler = get_cosine_schedule_with_warmup(optimizer, warm, steps)
+    elif cfg.scheduler == "linear":
+        scheduler = get_linear_schedule_with_warmup(optimizer, warm, steps)
+    else:
+        raise ValueError(f"scheduler must be 'linear' or 'cosine', "
+                         f"got {cfg.scheduler!r}")
+    if verbose:
+        print(f"  schedule: {cfg.scheduler}, {warm} warmup of {steps} steps")
     pos_weight = None
     if cfg.pos_weight_cap and cfg.pos_weight_cap > 1:
         pw = positive_weights(frames["train"]["symptoms"], cfg.pos_weight_cap)

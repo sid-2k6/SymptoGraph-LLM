@@ -633,3 +633,83 @@ case that reconstructs the shipped initialisation and asserts it **fails**.
 noise (+0.018 AUROC and +0.022 F1 against sds ≤ 0.006) and come from the concept
 pathway, which the defect does not touch. So does the regularisation result in
 §6.8: 0/15 runs memorised the risk split against 27/27 in v1.
+
+### 6.12 v2 results with a working ordinal head, and a retraction
+
+4 epochs, 3 seeds, MentalRoBERTa on an L4, selection on validation loss. The
+first table in §6.11 was produced by the defective head; these are the numbers
+after §6.11's fix. Mean ± std across seeds, validation at the selected epoch:
+
+| metric | `M0_flat` | `M1_bottleneck` | `M2_monotone` | `M3_weak` | `M4_denoised` |
+|---|---|---|---|---|---|
+| composite | 0.532 ± .037 | 0.552 ± .014 | 0.540 ± .038 | 0.555 ± .007 | **0.568 ± .016** |
+| symptom macro AUROC | 0.877 ± .002 | 0.874 ± .003 | 0.867 ± .004 | 0.875 ± .002 | 0.874 ± .004 |
+| symptom macro F1 | 0.773 ± .001 | 0.768 ± .002 | 0.761 ± .006 | 0.769 ± .002 | 0.770 ± .004 |
+| severity QWK | 0.451 ± .079 | **0.497 ± .022** | 0.459 ± .010 | 0.473 ± .007 | 0.481 ± .007 |
+| severity macro F1 | 0.486 ± .029 | **0.492 ± .013** | 0.367 ± .026 | 0.389 ± .014 | 0.384 ± .012 |
+| risk QWK | 0.373 ± .098 | 0.391 ± .032 | 0.400 ± .108 | 0.422 ± .019 | **0.453 ± .042** |
+| risk macro F1 | 0.308 ± .046 | 0.312 ± .028 | 0.273 ± .103 | 0.314 ± .047 | **0.348 ± .029** |
+| risk MAE ↓ | 0.864 ± .084 | 0.884 ± .023 | 0.899 ± .087 | 0.907 ± .042 | **0.845 ± .041** |
+| stress AUROC | 0.915 ± .002 | 0.911 ± .004 | 0.912 ± .003 | **0.918 ± .004** | 0.916 ± .004 |
+
+**Retraction.** §6.11 reported +0.018 symptom AUROC and +0.022 macro F1 for N-A
+and described them as large relative to seed noise. Those gains were an artefact
+of the broken head: `M1` is the same checkpoint in both runs (0.874), while
+`M2`–`M4` fall from 0.892 to 0.867–0.875 once the head works. **N-A produces no
+symptom gain.** The most likely mechanism for the artefact is that a large
+unfittable ordinal loss perturbed the shared encoder. This was the result the
+paper's headline was going to rest on, and it is not there.
+
+**Retraction, second.** §6.8 attributed the ordinal regression to the shared
+latent trait. The cause was unreachable interior classes (§6.11). The
+shared-trait hypothesis is untested and currently unsupported by any evidence;
+`monotone_shared_trait=False` should not be run on the strength of it.
+
+**The ordinal collapse is repaired.** Risk macro F1 0.131 → 0.348, risk MAE
+1.547 → 0.845, risk QWK 0.281 → 0.453. `M4_denoised` is now the best rung on
+composite and on all three risk metrics.
+
+**But the ladder is flat under significance testing.** Of 20 paired bootstrap
+comparisons (`significance.compare_models`, test split, 1,000 resamples, same
+examples both sides), exactly **one** reached p < 0.05 with a sign consistent
+across all three seeds: `M2 → M3` symptom macro AUROC, +0.008, p = 0.040. One
+positive in 20 tests is the expected false-positive count at α = 0.05, and
+Bonferroni correction (α = 0.0025) rejects it. The headline risk QWK gain
+(`M1` 0.391 → `M4` 0.453) carries max_p = 0.368 on its `M1 → M2` step. **No
+component in this ladder shows a statistically defensible gain.**
+
+**The monotone head never left its initialisation.** Learned item loadings for
+`M4` seed 0 span **0.993–1.004** on a scale where 1.000 is PHQ-9's equal
+weighting; cutpoints moved from `[-1.25, 1.25, 3.75]` to `[-1.25, 1.07, 3.39]`
+(severity) and `[-2.50, 0, 2.50, 5.00]` to `[-2.48, -0.03, 2.44, 4.85]` (risk);
+`z_scale` went 12.00 → 11.87. `item_w` and the cutpoints receive gradient only
+through 2,456 severity and 340 risk rows over 1,616 steps at `head_lr = 1e-3`,
+through a softplus whose derivative near 1/K is small. Two consequences:
+
+1. **The interpretability claim of N-A is unsupported.** "Learned item loadings
+   readable against PHQ-9's equal weighting" produced equal weighting. That
+   section cannot be written.
+2. Whatever helped risk is the cumulative-link structure and the reduction in
+   free parameters, not a learned instrument weighting — which is exactly what
+   `C_monotone_unconstrained` isolates.
+
+**`M3` and `M4` were truncated, not converged.** Their minimum validation loss
+falls at epoch 4 of 4 in every seed, and their minimum (1.28–1.31) is higher
+than `M0`/`M1`'s (1.13–1.17). `epochs = 4` was chosen from v1 curves produced by
+the free head. The 8-epoch re-run keeps the stopping rule unchanged and lives in
+`proposed_v2_e8`; it needs a fresh directory because `epochs` is not in the
+fingerprint, so resuming would restart the learning rate mid-run.
+
+### 6.13 The scheduler field was ignored
+
+`ProposedConfig.scheduler` defaulted to `"cosine"` and `train_one` always built
+`get_linear_schedule_with_warmup`. **Every run in this project — v1 and v2 —
+used linear warmup and decay**, while the notebooks and this document said
+cosine. The field is now honoured, the default is `"linear"` so the
+documentation matches the results that already exist, and `scheduler` is in the
+fingerprint so a linear checkpoint cannot be resumed under cosine.
+
+`cut_spacing` is also now a config field and part of the fingerprint for
+monotone runs. It was a module constant, so changing it in §6.11 left the
+fingerprint identical — a resumed run would silently have kept weights from the
+version whose interior classes were unreachable.
