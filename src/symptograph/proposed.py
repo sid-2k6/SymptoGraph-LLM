@@ -45,6 +45,16 @@ from .rng import capture_rng_state, restore_rng_state
 
 N_SEVERITY, N_RISK = 4, 5
 
+# Initial gap between ordinal cutpoints. See the comment where cut_inc is built:
+# below about 2.2 the interior classes of a cumulative-link head can never be
+# the most likely class, whatever the latent trait does.
+CUT_SPACING = 2.5
+
+
+def _softplus_inv(y: float) -> float:
+    """x such that softplus(x) == y, for initialising positive parameters."""
+    return float(math.log(math.expm1(y)))
+
 # The ladder, in order. Each entry switches on exactly one more component.
 LADDER: list[tuple[str, dict]] = [
     ("L0_flat", dict(use_bottleneck=False, use_graph=False, use_weak=False,
@@ -706,21 +716,40 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
                 self.ord_tasks = ("severity", "risk")
                 n_traits = 1 if cfg.monotone_shared_trait else len(self.ord_tasks)
                 self.n_traits = n_traits
-                # init so that z lands near the initial cutpoints instead of
-                # saturating the top class: softplus(-3) ~ 0.049, and about half
-                # the 22 concepts fire at init, giving z ~ 0.5 against
-                # tau ~ [0, 0.69, 1.39]
-                self.item_w = nn.Parameter(torch.full(
-                    (n_traits, K), -3.0 if cfg.monotone_nonneg else 1.0 / K))
-                # ordered cutpoints per task, parameterised as a first cut plus
-                # positive increments, so tau_1 < tau_2 < ... by construction
-                self.cut0 = nn.ParameterDict({
-                    "severity": nn.Parameter(torch.zeros(1)),
-                    "risk": nn.Parameter(torch.zeros(1))})
-                self.cut_inc = nn.ParameterDict({
-                    "severity": nn.Parameter(torch.zeros(N_SEVERITY - 2)),
-                    "risk": nn.Parameter(torch.zeros(N_RISK - 2))})
-                self.z_scale = nn.Parameter(torch.ones(n_traits))
+                # Item weights are initialised to sum to 1, so the raw trait is
+                # a weighted mean of concept activations in [0, 1].
+                init_w = (_softplus_inv(1.0 / K) if cfg.monotone_nonneg
+                          else 1.0 / K)
+                self.item_w = nn.Parameter(torch.full((n_traits, K), init_w))
+
+                # Cutpoints: a first cut plus positive increments, so
+                # tau_1 < tau_2 < ... holds by construction.
+                #
+                # The SPACING matters far more than it looks. In a cumulative
+                # link model P(y=j) = sigma(z-tau_j) - sigma(z-tau_{j+1}), so an
+                # interior class peaks at about sigma(d/2) - sigma(-d/2) for
+                # spacing d. The first version initialised the increments at
+                # zero, giving d = softplus(0) = 0.69 and an interior peak of
+                # 0.17 - permanently below the extremes. Classes 1 and 2 of
+                # severity, and 1, 2 and 3 of risk, could never be the argmax at
+                # any value of z. Measured cost: risk macro F1 0.312 -> 0.131
+                # and risk MAE 0.884 -> 1.547.
+                #
+                # d = 2.5 puts the interior peak at 0.55, above the extremes, so
+                # every class is reachable. Training moves them from there.
+                self.cut0 = nn.ParameterDict()
+                self.cut_inc = nn.ParameterDict()
+                for task, n_cls in (("severity", N_SEVERITY), ("risk", N_RISK)):
+                    self.cut0[task] = nn.Parameter(
+                        torch.tensor([(1.0 - (n_cls - 1) / 2.0) * CUT_SPACING]))
+                    self.cut_inc[task] = nn.Parameter(torch.full(
+                        (n_cls - 2,), _softplus_inv(CUT_SPACING)))
+
+                # z = z_scale * (z_raw - 0.5) must be able to traverse the whole
+                # cutpoint span, which is (n_cls-1)*CUT_SPACING wide. z_raw lies
+                # in [0, 1], so the scale has to be at least that span.
+                span = (max(N_SEVERITY, N_RISK) - 1) * CUT_SPACING
+                self.z_scale = nn.Parameter(torch.full((n_traits,), span * 1.2))
                 if cfg.monotone_residual:
                     self.z_residual = nn.Linear(self.head_in, n_traits)
             else:
@@ -816,8 +845,10 @@ def build_model(cfg: ProposedConfig, onto: Ontology, graph: SymptomGraph | None)
             if self.monotone:
                 w = (torch.nn.functional.softplus(self.item_w)
                      if self.cfg.monotone_nonneg else self.item_w)   # T,K
-                Z = (torch.einsum("bk,tk->bt", out["concepts"], w)
-                     * self.z_scale.unsqueeze(0))                    # B,T
+                # centred on 0.5 so z starts near the middle of the cutpoints
+                # rather than at one end of them
+                z_raw = torch.einsum("bk,tk->bt", out["concepts"], w)
+                Z = (z_raw - 0.5) * self.z_scale.unsqueeze(0)        # B,T
                 if self.cfg.monotone_residual:
                     Z = Z + self.z_residual(feat)
                 out["latent_trait"] = Z

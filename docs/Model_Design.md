@@ -579,3 +579,57 @@ fingerprint format, every rung in both ladders, the concatenated and streamed
 weak paths, and the changes that must still be refused. A pre-v2 checkpoint is
 asserted to resume for `M0_flat`/`M1_bottleneck` — architecturally unchanged —
 and to be refused for `M2`-`M4`, whose weights it cannot contain.
+
+### 6.11 N-A's ordinal head could not predict its middle classes
+
+The full v2 per-task table exposed a structural defect, not a modelling
+trade-off:
+
+| metric | `M1_bottleneck` | `M2_monotone` | change |
+|---|---|---|---|
+| symptom macro AUROC | 0.874 ± 0.003 | **0.892 ± 0.004** | **+0.018** |
+| symptom macro F1 | 0.768 ± 0.002 | **0.790 ± 0.003** | **+0.022** |
+| severity macro F1 | 0.492 ± 0.013 | 0.306 ± 0.009 | −0.186 |
+| risk macro F1 | 0.312 ± 0.028 | 0.131 ± 0.011 | −0.181 |
+| risk MAE (lower better) | 0.884 ± 0.023 | 1.547 ± 0.129 | **+75%** |
+| severity QWK | 0.497 ± 0.022 | 0.432 ± 0.020 | −0.065 |
+| risk QWK | 0.391 ± 0.032 | 0.281 ± 0.063 | −0.110 |
+
+A macro-F1 collapse of that size together with an MAE that nearly doubles is not
+over-constraint; it is a head that emits only two of five classes.
+
+**Cause.** In a cumulative-link model
+`P(y=j) = σ(z−τ_j) − σ(z−τ_{j+1})`, an interior class peaks at about
+`σ(d/2) − σ(−d/2)` for cutpoint spacing `d`. The increments were initialised at
+zero, so `d = softplus(0) = 0.69` and the interior peak was **0.17** —
+permanently below the extremes. Measured by sweeping the attainable range of
+`z`, severity could only ever produce classes {0, 3} and risk only {0, 4}.
+Classes 1 and 2 of severity, and 1, 2 and 3 of risk, were unreachable at **any**
+value of the latent trait. `item_w` initialised at `softplus(-3) = 0.049` also
+capped `z` at 1.07 across 22 concepts, so the trait could not traverse its own
+cutpoints.
+
+This also corrects §6.8, which attributed the ordinal regression to the shared
+latent trait. The shared trait may still be a limitation, but it was not the
+cause, and `monotone_shared_trait` has not yet been tested against a head that
+works.
+
+**Fix.** `CUT_SPACING = 2.5` puts the interior peak at 0.55, above the extremes;
+cutpoints start symmetric about zero; item weights are initialised to sum to 1
+so the raw trait is a weighted mean in [0, 1]; and `z = z_scale·(z_raw − 0.5)`
+with `z_scale` initialised to 1.2× the full cutpoint span, so the trait can
+traverse every boundary. All classes are reachable after the change, and the
+initial marginals are sane: severity `[0.22, 0.56, 0.20, 0.02]`, risk
+`[0.08, 0.42, 0.42, 0.07, 0.01]`.
+
+**Why the existing checks missed it.** §6.3 verified non-negative weights,
+strictly increasing cutpoints, monotone expected value, and probabilities
+summing to one. Every one of those passed on a head that could not predict three
+of five classes, because none of them asked whether a class is ever the argmax.
+`tests/test_ordinal_head.py` now tests reachability directly, and includes a
+case that reconstructs the shipped initialisation and asserts it **fails**.
+
+**What survives regardless.** The symptom gains are large relative to seed
+noise (+0.018 AUROC and +0.022 F1 against sds ≤ 0.006) and come from the concept
+pathway, which the defect does not touch. So does the regularisation result in
+§6.8: 0/15 runs memorised the risk split against 27/27 in v1.
