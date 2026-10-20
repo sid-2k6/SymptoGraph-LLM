@@ -121,6 +121,24 @@ def _nanmean(values: Sequence) -> float | None:
 # --------------------------------------------------------------------------- #
 # full metric bundle
 # --------------------------------------------------------------------------- #
+
+def class_weights(values: np.ndarray, n_classes: int, cap: float = 10.0):
+    """Inverse-frequency weights for an ordinal target, capped.
+
+    Lives here rather than in ``proposed`` because both the proposed model and
+    the baselines need it. Depression severity is 72% "minimum"
+    (1767/205/288/196) and suicide risk is similarly skewed; unweighted
+    cross-entropy collapses both heads onto the majority class, which is why
+    severity QWK sat at exactly 0.000. A baseline trained without this is not
+    comparable to a proposed model trained with it.
+    """
+    v = values[~np.isnan(values)].astype(int)
+    if v.size == 0:
+        return None
+    counts = np.bincount(v, minlength=n_classes).astype(np.float32)
+    w = np.where(counts > 0, counts.sum() / np.maximum(counts, 1) / n_classes, 1.0)
+    return np.clip(w, 1.0 / cap, cap).astype(np.float32)
+
 def tune_thresholds(prob: np.ndarray, y: np.ndarray, grid=None) -> np.ndarray:
     """Per-symptom decision threshold that maximises F1 on the given split.
 

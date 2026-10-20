@@ -38,6 +38,7 @@ from .graph import SymptomGraph
 from .metrics import (aggregate_seeds, compute_metrics, flatten_metrics,
                       headline_table, plot_history_pub, plot_per_symptom_pub,
                       plot_risk_coverage, plot_seed_aggregate, positive_weights,
+                      class_weights,
                       selective_metrics, set_publication_style, tune_thresholds)
 from .jsonio import read_json, write_json
 from .preprocess import Ontology
@@ -912,16 +913,6 @@ def contrastive_loss(projection, symptoms, weights, cfg: ProposedConfig):
     log_prob = sim - torch.logsumexp(sim, dim=-1, keepdim=True)
     per_row = -(target * log_prob).sum(-1) / target.sum(-1).clamp(min=1e-6)
     return per_row[target.sum(-1) > 0].mean()
-
-
-def class_weights(values: np.ndarray, n_classes: int, cap: float = 10.0):
-    """Inverse-frequency weights for an ordinal target, capped."""
-    v = values[~np.isnan(values)].astype(int)
-    if v.size == 0:
-        return None
-    counts = np.bincount(v, minlength=n_classes).astype(np.float32)
-    w = np.where(counts > 0, counts.sum() / np.maximum(counts, 1) / n_classes, 1.0)
-    return np.clip(w, 1.0 / cap, cap).astype(np.float32)
 
 
 def compute_loss(out: dict, batch: dict, model, cfg: ProposedConfig,

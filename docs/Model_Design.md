@@ -713,3 +713,91 @@ fingerprint so a linear checkpoint cannot be resumed under cosine.
 monotone runs. It was a module constant, so changing it in §6.11 left the
 fingerprint identical — a resumed run would silently have kept weights from the
 version whose interior classes were unreachable.
+
+## 7. Comparison against the literature
+
+### 7.1 The baselines were not on the proposed model's protocol
+
+Found while setting up the comparison, and it compounds the review's first two
+comments:
+
+| setting | baselines (before) | proposed v2 |
+|---|---|---|
+| batch size | 16 | 32 |
+| max_length | 256 | 192 |
+| epochs | 8 | 4 then 8 |
+| selection | `selection_score` | `neg_val_loss` |
+| early stopping | none | patience 2 |
+| label smoothing | none | 0.05 |
+| **ordinal class weights** | **absent** | **present** |
+| per-example predictions saved | no | yes |
+
+The missing ordinal class weights are the serious one. Severity is 72% majority
+class and risk has 340 training rows; unweighted cross-entropy collapses both
+heads onto the majority class, which is how severity QWK reached exactly 0.000
+in §3.9. **Any severity or risk margin previously measured against those
+baselines was measuring the class weighting, not the architecture.** The
+baselines also saved no per-example predictions, so no paired significance test
+against a baseline was possible at all.
+
+`class_weights` moved from `proposed` to `metrics` so both harnesses call one
+implementation and the weighting cannot drift between them. `baselines.py` now
+has `ordinal_class_weights`, `label_smoothing`, `scheduler`,
+`early_stopping_patience`, `neg_val_loss` selection and
+`predictions_{split}.npz`. Notebook 09 asserts field-by-field parity against the
+proposed model's stored config before training anything.
+
+### 7.2 Three comparison models, and what they are
+
+Chosen from this project's own survey, each contesting a different claim:
+
+| name | after | contests |
+|---|---|---|
+| `sota_ens_stack` | [11] Suksam, Kaewbuadee & Jareanpon (2026), *Information* 17(6), 546 | N1, via a transformer stacking ensemble |
+| `sota_postgraph` | [18] Rehman et al. (2026), *Healthcare* 14(11), 1440 | N2, via a graph from post semantics and author relations |
+| `sota_prompt_ssl` | [21] Hsieh et al. (2025), *Scientific Reports* | the multi-label setup, via prompt perspectives and perturbation consistency |
+
+All three register into `baselines.MODEL_REGISTRY`, so they inherit the splits,
+loss, class weights, threshold tuning, selection rule, seeds, logging and
+prediction dumps unchanged. Only the representation differs.
+
+**These are re-implementations of each described architecture on this project's
+label space, not reproductions of the published systems, and their numbers must
+not be printed beside the numbers in those papers.** The full method sections
+were not reachable — MDPI blocks automated access and no author code was found —
+so each was built from the published description of its modules, with every
+underdetermined choice marked `DEVIATION` in `src/symptograph/sota.py`. Known
+deviations: two base learners rather than the paper's full set of ensemble
+strategies, memory-bound at batch 32; the post graph built per mini-batch rather
+than over the corpus, which also preserves the split boundary that a
+transductive corpus graph would breach; two prompt perspectives; dropout
+resampling as the perturbation operator.
+
+Two components cannot be exercised on this data and are reported as out of scope
+rather than as failures: [11]'s Phase 2 DSM-5 screening needs several posts per
+author inside a 14-day window, and the gold split has a median of one post per
+author; [18]'s SHAP and LIME analyses are post-hoc and change no metric.
+
+**[10] Bao, Pérez & Parapar (2024) was considered and excluded.** Its
+contribution is the quality of natural-language symptom explanations. Stripped
+of generation it reduces to the `mentalroberta` baseline already present, and
+explanation quality cannot be scored by this metric suite — the same reason N4
+was left out of the proposed ladder. Including it as a classification competitor
+would misrepresent the paper; the exclusion belongs in the text.
+
+### 7.3 What the comparison can support
+
+It can support a claim that the proposed model matches or exceeds a correctly
+trained MentalRoBERTa baseline and three 2024–2026 architectures **under one
+identical protocol on leakage-controlled splits, with paired bootstrap tests
+reported in both directions**. The parity assertion and the encoder check are
+what make that auditable.
+
+It cannot support any claim about reproducing or beating the published results of
+[11], [18] or [21].
+
+One asymmetry remains open: the baselines and comparison models see no weak
+labels while the proposed `M3`/`M4` see ~50,000. A matched-data run with
+`use_weak_labels=True` is required before attributing any margin to
+architecture. `tests/test_sota.py` pins the parity requirements; the suite is now
+103 tests.

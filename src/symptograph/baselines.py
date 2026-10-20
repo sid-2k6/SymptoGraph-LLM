@@ -28,6 +28,7 @@ scheduler and RNG state. Resuming continues from the next epoch and **appends** 
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -40,12 +41,25 @@ import pandas as pd
 
 from .metrics import (aggregate_seeds, compute_metrics, flatten_metrics,
                       headline_table, plot_history, plot_per_symptom_bars,
-                      plot_seed_aggregate, positive_weights, tune_thresholds)
+                      plot_seed_aggregate, positive_weights, class_weights, tune_thresholds)
 from .jsonio import write_json
 from .preprocess import Ontology
 from .rng import capture_rng_state, restore_rng_state
 
 BASELINES = ("tfidf_mlp", "bilstm_attn", "mentalroberta")
+
+# name -> builder(cfg, onto, train_texts, SharedHeads, load_transformer)
+# Populated by symptograph.sota so comparison models share this whole harness:
+# the same splits, loss, class weights, threshold tuning, selection rule,
+# checkpointing, history.csv and saved predictions.
+MODEL_REGISTRY: dict = {}
+
+
+def register_model(name: str):
+    def deco(fn):
+        MODEL_REGISTRY[name] = fn
+        return fn
+    return deco
 N_SEVERITY, N_RISK = 4, 5
 
 
@@ -67,6 +81,8 @@ class TrainConfig:
         "tfidf_mlp": 1e-3, "bilstm_attn": 1e-3, "mentalroberta": 2e-5})
     task_weights: dict = field(default_factory=lambda: {
         "symptoms": 1.0, "severity": 1.0, "risk": 1.0, "stress": 0.5})
+    # weight on a model's own auxiliary consistency term, if it exposes one
+    consistency_weight: float = 1.0
     transformer_name: str = "mental/mental-roberta-base"
     transformer_fallback: str = "roberta-base"
     # mental/mental-roberta-base is a gated repo. Without this, a 403 silently
@@ -80,13 +96,35 @@ class TrainConfig:
     limit_train: int | None = None
     limit_eval: int | None = None
     amp: bool = True
+    # "selection_score", "composite", or "neg_val_loss" (lowest validation loss)
     selection_metric: str = "selection_score"
     pos_weight_cap: float = 10.0
     tune_thresholds: bool = True
+    # Parity with proposed.ProposedConfig. Without these the baselines were
+    # handicapped on exactly the two tasks the proposed model claims to win:
+    # severity is 72% majority class and risk has 340 training rows, and
+    # unweighted cross-entropy collapses both heads onto the majority class.
+    # Any severity or risk margin measured against a baseline that lacks this
+    # is measuring the class weighting, not the architecture.
+    ordinal_class_weights: bool = True
+    label_smoothing: float = 0.0
+    scheduler: str = "linear"          # "linear" or "cosine"
+    early_stopping_patience: int = 0   # 0 disables
     strict_encoder_note: str = "see strict_encoder"
 
     def lr_for(self, model: str) -> float:
-        return self.shared_lr if self.shared_lr is not None else self.lr_by_model[model]
+        """Learning rate for one model.
+
+        Unknown names fall back to the transformer rate, because every
+        comparison model registered in ``MODEL_REGISTRY`` is transformer-backed
+        and must use the same encoder rate as ``mentalroberta`` for the
+        comparison to isolate architecture. A per-architecture rate is still
+        needed for the non-transformer baselines: 2e-5 does not move a
+        randomly-initialised MLP, and 1e-3 diverges a pretrained encoder.
+        """
+        if self.shared_lr is not None:
+            return self.shared_lr
+        return self.lr_by_model.get(model, self.lr_by_model["mentalroberta"])
 
 
 # --------------------------------------------------------------------------- #
@@ -159,7 +197,8 @@ def load_splits(processed_dir: str, onto: Ontology, cfg: TrainConfig) -> dict:
             if c not in extra:
                 extra[c] = np.int8(-1)
         extra["split"] = "train"
-        keep = ["post_id", "text", "split"] + sym_cols
+        extra["author_hash"] = None
+        keep = ["post_id", "text", "split", "author_hash"] + sym_cols
         frames["train"] = pd.concat([frames["train"][keep], extra[keep]],
                                     ignore_index=True)
     return frames
@@ -180,6 +219,14 @@ class TextDataset:
 
     def __init__(self, part: pd.DataFrame, onto: Ontology):
         self.texts = part["text"].fillna("").tolist()
+        # Stable integer per author, for models that add same-author edges.
+        # -1 where the corpus has no author (non-Reddit rows and weak rows).
+        if "author_hash" in part:
+            self.group = np.array(
+                [(-1 if not a else (int(hashlib.md5(str(a).encode()).hexdigest()[:8], 16)))
+                 for a in part["author_hash"].tolist()], dtype=np.int64)
+        else:
+            self.group = np.full(len(self.texts), -1, dtype=np.int64)
         t = targets_from_frame(part, onto)
         self.symptoms = t["symptoms"].astype(np.float32)
         self.severity, self.risk, self.stress = t["severity"], t["risk"], t["stress"]
@@ -190,7 +237,7 @@ class TextDataset:
     def __getitem__(self, i):
         return {"text": self.texts[i], "symptoms": self.symptoms[i],
                 "severity": self.severity[i], "risk": self.risk[i],
-                "stress": self.stress[i]}
+                "stress": self.stress[i], "group": self.group[i]}
 
 
 def make_collate(encoder_kind: str, helper):
@@ -203,6 +250,7 @@ def make_collate(encoder_kind: str, helper):
             "severity": torch.tensor(np.array([b["severity"] for b in batch])),
             "risk": torch.tensor(np.array([b["risk"] for b in batch])),
             "stress": torch.tensor(np.array([b["stress"] for b in batch])),
+            "group": torch.tensor(np.array([b["group"] for b in batch])),
         }
         texts = [b["text"] for b in batch]
         if encoder_kind == "tfidf":
@@ -213,9 +261,9 @@ def make_collate(encoder_kind: str, helper):
             out["input_ids"] = torch.tensor(ids)
             out["lengths"] = torch.tensor(lengths)
         else:
-            enc = helper(texts)
-            out["input_ids"] = enc["input_ids"]
-            out["attention_mask"] = enc["attention_mask"]
+            # a helper may return extra tensors, e.g. one tokenised view per
+            # prompt perspective; merge whatever it produces
+            out.update(helper(texts))
         return out
     return collate
 
@@ -245,6 +293,35 @@ class SimpleVocab:
 # --------------------------------------------------------------------------- #
 # model
 # --------------------------------------------------------------------------- #
+def load_transformer(cfg: "TrainConfig", model_name: str):
+    """``(encoder, tokenizer, loaded_name, fell_back)``, honouring strict_encoder.
+
+    Extracted so the comparison models in ``symptograph.sota`` cannot acquire a
+    different encoder-loading policy from the baselines. A silent fallback here
+    once produced a run labelled "mentalroberta" that was actually RoBERTa for
+    two of three seeds.
+    """
+    from transformers import AutoModel, AutoTokenizer
+    try:
+        tok = AutoTokenizer.from_pretrained(model_name)
+        enc = AutoModel.from_pretrained(model_name)
+        return enc, tok, model_name, False
+    except Exception as exc:
+        if cfg.strict_encoder:
+            raise RuntimeError(
+                f"Could not load the requested encoder {model_name!r}: "
+                f"{type(exc).__name__}: {exc}\n\n"
+                f"strict_encoder=True, so this will not silently fall back to "
+                f"{cfg.transformer_fallback!r}.") from exc
+        print("  " + "!" * 68)
+        print(f"  WARNING: could not load {model_name} ({type(exc).__name__}).")
+        print(f"  FALLING BACK to {cfg.transformer_fallback}.")
+        print("  " + "!" * 68, flush=True)
+        fb = cfg.transformer_fallback
+        return (AutoModel.from_pretrained(fb), AutoTokenizer.from_pretrained(fb),
+                fb, True)
+
+
 def build_model(name: str, cfg: TrainConfig, onto: Ontology, train_texts):
     """Return ``(model, encoder_kind, collate_helper)``."""
     import torch
@@ -267,6 +344,10 @@ def build_model(name: str, cfg: TrainConfig, onto: Ontology, train_texts):
             h = self.drop(h)
             return {"symptoms": self.symptoms(h), "severity": self.severity(h),
                     "risk": self.risk(h), "stress": self.stress(h).squeeze(-1)}
+
+    if name in MODEL_REGISTRY:
+        return MODEL_REGISTRY[name](cfg, onto, train_texts, SharedHeads,
+                                    load_transformer)
 
     class TfidfMLP(nn.Module):
         def __init__(self, in_dim):
@@ -362,7 +443,7 @@ def build_model(name: str, cfg: TrainConfig, onto: Ontology, train_texts):
 # loss
 # --------------------------------------------------------------------------- #
 def multitask_loss(out: dict, batch: dict, cfg: TrainConfig,
-                   pos_weight=None) -> tuple:
+                   pos_weight=None, ordinal_weights=None) -> tuple:
     """Masked multi-task loss. Rows missing a target contribute nothing to it."""
     import torch
     import torch.nn.functional as F
@@ -391,7 +472,9 @@ def multitask_loss(out: dict, batch: dict, cfg: TrainConfig,
         t = batch[key]
         m = ~torch.isnan(t)
         if m.any():
-            l = F.cross_entropy(out[logits_key][m], t[m].long())
+            cw = (ordinal_weights or {}).get(key)
+            l = F.cross_entropy(out[logits_key][m], t[m].long(), weight=cw,
+                                label_smoothing=cfg.label_smoothing)
             total = total + cfg.task_weights[weight_key] * l
             parts[key] = float(l.detach())
 
@@ -401,6 +484,10 @@ def multitask_loss(out: dict, batch: dict, cfg: TrainConfig,
         l = F.binary_cross_entropy_with_logits(out["stress"][m], t[m])
         total = total + cfg.task_weights["stress"] * l
         parts["stress"] = float(l.detach())
+
+    if "consistency" in out:
+        total = total + cfg.consistency_weight * out["consistency"]
+        parts["consistency"] = float(out["consistency"].detach())
 
     return total, parts
 
@@ -417,7 +504,7 @@ def _collect(preds: dict) -> dict:
 
 def _run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None,
                scaler=None, device="cpu", train: bool = True,
-               pos_weight=None, thresholds=None):
+               pos_weight=None, thresholds=None, ordinal_weights=None):
     """One pass. Training predictions are gathered from the same forward passes,
     so train metrics cost nothing extra."""
     import torch
@@ -433,10 +520,12 @@ def _run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None,
             if scaler is not None and train:
                 with torch.autocast(device_type="cuda", dtype=torch.float16):
                     out = model(batch)
-                    loss, _ = multitask_loss(out, batch, cfg, pos_weight)
+                    loss, _ = multitask_loss(out, batch, cfg, pos_weight,
+                                             ordinal_weights)
             else:
                 out = model(batch)
-                loss, _ = multitask_loss(out, batch, cfg, pos_weight)
+                loss, _ = multitask_loss(out, batch, cfg, pos_weight,
+                                         ordinal_weights)
 
         if train:
             optimizer.zero_grad(set_to_none=True)
@@ -462,8 +551,14 @@ def _run_epoch(model, loader, cfg, onto, optimizer=None, scheduler=None,
     preds = {k: np.concatenate(v) if v else np.zeros((0,)) for k, v in buf.items()}
     targets = {k: np.concatenate(v) if v else np.zeros((0,)) for k, v in tgt.items()}
     bundle = compute_metrics(_collect(preds), targets, onto, thresholds=thresholds)
+    col = _collect(preds)
     return total_loss / max(n_batches, 1), bundle, {
-        "symptom_prob": _collect(preds)["symptom_prob"], "symptoms": targets["symptoms"]}
+        "symptom_prob": col["symptom_prob"], "symptoms": targets["symptoms"],
+        # significance.compare_models reads these; without them no paired test
+        # against a baseline is possible at all.
+        "severity_pred": preds["severity"], "severity_true": targets["severity"],
+        "risk_pred": preds["risk"], "risk_true": targets["risk"],
+        "stress_prob": col["stress_prob"], "stress_true": targets["stress"]}
 
 
 # --------------------------------------------------------------------------- #
@@ -489,6 +584,22 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
+
+    ordinal_weights = None
+    if cfg.ordinal_class_weights:
+        ordinal_weights = {}
+        for key, col, n_cls in (("severity", "severity_depression", N_SEVERITY),
+                                ("risk", "severity_risk", N_RISK)):
+            vals = (frames["train"][col].to_numpy(dtype=np.float32)
+                    if col in frames["train"] else np.zeros(0, dtype=np.float32))
+            cw = class_weights(vals, n_cls)
+            if cw is not None:
+                ordinal_weights[key] = torch.tensor(cw, device=device)
+        if verbose and ordinal_weights:
+            for k, v in ordinal_weights.items():
+                print(f"  {k} class weights: "
+                      f"{[round(float(x), 2) for x in v.tolist()]}")
+
     collate = make_collate(kind, helper)
     loaders = {}
     for split in ("train", "val", "test"):
@@ -507,7 +618,12 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
          {"params": no_decay, "weight_decay": 0.0}], lr=cfg.lr_for(name))
     steps = max(len(loaders["train"]), 1) * cfg.epochs
     from transformers import get_linear_schedule_with_warmup
-    scheduler = get_linear_schedule_with_warmup(
+    _mk = get_linear_schedule_with_warmup
+    if cfg.scheduler == "cosine":
+        from transformers import get_cosine_schedule_with_warmup as _mk
+    elif cfg.scheduler != "linear":
+        raise ValueError(f"scheduler must be 'linear' or 'cosine', got {cfg.scheduler!r}")
+    scheduler = _mk(
         optimizer, int(cfg.warmup_ratio * steps), steps)
     scaler = torch.amp.GradScaler("cuda") if (cfg.amp and device == "cuda") else None
 
@@ -558,11 +674,15 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
         t0 = time.time()
         train_loss, train_bundle, _ = _run_epoch(
             model, loaders["train"], cfg, onto, optimizer, scheduler, scaler,
-            device, train=True, pos_weight=pos_weight)
+            device, train=True, pos_weight=pos_weight, ordinal_weights=ordinal_weights)
         val_loss, val_bundle, _ = _run_epoch(
             model, loaders["val"], cfg, onto, device=device, train=False,
-            pos_weight=pos_weight)
-        score = val_bundle.get(cfg.selection_metric)
+            pos_weight=pos_weight, ordinal_weights=ordinal_weights)
+        # neg_val_loss selects the epoch with the LOWEST validation loss.
+        # selection_score is 2/3 symptom metrics, which keep climbing while the
+        # ordinal heads memorise their small training sets.
+        score = (-val_loss if cfg.selection_metric == "neg_val_loss"
+                 else val_bundle.get(cfg.selection_metric))
         score = -math.inf if score is None else score
 
         row = {"baseline": name, "seed": seed, "epoch": epoch,
@@ -577,6 +697,10 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
                                    header=not os.path.exists(history_path))
 
         improved = score > best_score
+        if improved:
+            since_improved = 0
+        else:
+            since_improved = locals().get("since_improved", 0) + 1
         if improved:
             best_score, best_epoch = score, epoch
             torch.save({"model": model.state_dict(), "epoch": epoch,
@@ -612,8 +736,18 @@ def train_one(name: str, seed: int, cfg: TrainConfig, processed_dir: str,
                                    device=device, train=False, thresholds=thresholds)
     _, final_val, _ = _run_epoch(model, loaders["val"], cfg, onto,
                                  device=device, train=False, thresholds=thresholds)
-    _, final_test, _ = _run_epoch(model, loaders["test"], cfg, onto,
-                                  device=device, train=False, thresholds=thresholds)
+    _, final_test, test_raw = _run_epoch(model, loaders["test"], cfg, onto,
+                                         device=device, train=False,
+                                         thresholds=thresholds)
+    _, _, val_raw = _run_epoch(model, loaders["val"], cfg, onto, device=device,
+                               train=False, thresholds=thresholds)
+    # Per-example predictions, so significance.compare_models can run a PAIRED
+    # bootstrap of any comparison model against the proposed model without
+    # retraining either of them.
+    for split, raw in (("val", val_raw), ("test", test_raw)):
+        np.savez_compressed(
+            os.path.join(out_dir, f"predictions_{split}.npz"),
+            **{k: v for k, v in raw.items() if isinstance(v, np.ndarray)})
 
     payload = {
         "baseline": name, "seed": seed,
