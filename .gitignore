@@ -17,3 +17,7 @@ proposed/
 proposed_*/
 prop_*/
 wl_fake/
+
+*.pt
+*.pth
+*.ckpt

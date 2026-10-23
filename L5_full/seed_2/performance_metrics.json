@@ -1,0 +1,1382 @@
+{
+  "rung": "L5_full",
+  "seed": 2,
+  "encoder": "mental/mental-roberta-base",
+  "encoder_requested": "mental/mental-roberta-base",
+  "encoder_fallback_used": false,
+  "selection_metric": "selection_score",
+  "best_epoch": 9,
+  "best_val_score": 0.713920083046277,
+  "epochs_completed": 10,
+  "device": "cuda",
+  "config": {
+    "epochs": 10,
+    "batch_size": 32,
+    "eval_batch_size": 64,
+    "max_length": 192,
+    "lr": 2e-05,
+    "head_lr": 0.001,
+    "weight_decay": 0.01,
+    "warmup_ratio": 0.1,
+    "grad_clip": 1.0,
+    "dropout": 0.1,
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "encoder_name": "mental/mental-roberta-base",
+    "encoder_fallback": "roberta-base",
+    "strict_encoder": true,
+    "tiny_random_encoder": false,
+    "use_bottleneck": true,
+    "use_graph": true,
+    "use_weak": true,
+    "use_contrastive": true,
+    "use_uncertainty": true,
+    "graph_dim": 128,
+    "graph_layers": 2,
+    "graph_l1": 0.0001,
+    "contrastive_weight": 0.1,
+    "contrastive_temperature": 0.1,
+    "contrastive_jaccard": 0.5,
+    "uncertainty_weight": 0.5,
+    "uncertainty_detached": true,
+    "concept_gated_pooling": true,
+    "pos_weight_cap": 10.0,
+    "ordinal_class_weights": true,
+    "tune_thresholds": true,
+    "scheduler": "cosine",
+    "early_stopping_patience": 4,
+    "task_weights": {
+      "symptoms": 1.0,
+      "severity": 1.0,
+      "risk": 1.0,
+      "stress": 0.5
+    },
+    "weak_label_path": "/content/drive/MyDrive/hari/SymptoGraph-LLM/weak_labels/weak_labels.parquet",
+    "weak_max_rows": 6000,
+    "allow_mock_weak_labels": false,
+    "limit_train": null,
+    "limit_eval": null,
+    "amp": true,
+    "amp_dtype": "auto",
+    "selection_metric": "selection_score",
+    "save_optimizer_state": true,
+    "checkpoint_every": 1
+  },
+  "components": {
+    "use_bottleneck": true,
+    "use_graph": true,
+    "use_weak": true,
+    "use_contrastive": true,
+    "use_uncertainty": true
+  },
+  "splits": {
+    "train": 18911,
+    "val": 2862,
+    "test": 3989
+  },
+  "n_weak_rows": 6000,
+  "train": {
+    "per_symptom": {
+      "anhedonia": {
+        "n": 6000,
+        "n_positive": 1441,
+        "positive_rate": 0.24016666666666667,
+        "precision": 0.7861607644744238,
+        "recall": 0.9658709229701596,
+        "f1": 0.8667991893381273,
+        "accuracy": 0.9276666666666666,
+        "auroc": 0.987463342445619,
+        "ap": 0.935797519180291,
+        "threshold": 0.5
+      },
+      "depressed_mood": {
+        "n": 4196,
+        "n_positive": 3240,
+        "positive_rate": 0.7721639656816015,
+        "precision": 0.9358989598811293,
+        "recall": 0.9712345679012346,
+        "f1": 0.953239412613476,
+        "accuracy": 0.9048999046711154,
+        "auroc": 0.9477418125936257,
+        "ap": 0.9899113568218572,
+        "threshold": 0.5
+      },
+      "sleep_disturbance": {
+        "n": 6000,
+        "n_positive": 915,
+        "positive_rate": 0.1525,
+        "precision": 0.7152755905511812,
+        "recall": 0.9850273224043716,
+        "f1": 0.8287535054764134,
+        "accuracy": 0.9401666666666667,
+        "auroc": 0.9962492813428545,
+        "ap": 0.9397860280134442,
+        "threshold": 0.5
+      },
+      "fatigue": {
+        "n": 6000,
+        "n_positive": 1831,
+        "positive_rate": 0.30516666666666664,
+        "precision": 0.7638380281690141,
+        "recall": 0.942992900054615,
+        "f1": 0.8440131069159117,
+        "accuracy": 0.8895,
+        "auroc": 0.9684694395278459,
+        "ap": 0.9146110017377952,
+        "threshold": 0.5
+      },
+      "appetite_change": {
+        "n": 6000,
+        "n_positive": 495,
+        "positive_rate": 0.0825,
+        "precision": 0.804219001610306,
+        "recall": 1.0,
+        "f1": 0.8914871209010907,
+        "accuracy": 0.9863333333333334,
+        "auroc": 1.0,
+        "ap": 0.9736288411469997,
+        "threshold": 0.5
+      },
+      "worthlessness_guilt": {
+        "n": 4196,
+        "n_positive": 2079,
+        "positive_rate": 0.49547187797902764,
+        "precision": 0.8757645923781958,
+        "recall": 0.8732948532948533,
+        "f1": 0.8745279791533254,
+        "accuracy": 0.8660533841754051,
+        "auroc": 0.9466947019285233,
+        "ap": 0.9497072248783837,
+        "threshold": 0.5
+      },
+      "concentration_problems": {
+        "n": 4196,
+        "n_positive": 810,
+        "positive_rate": 0.19304099142040038,
+        "precision": 0.6733687943262412,
+        "recall": 0.9298765432098766,
+        "f1": 0.7811029692258583,
+        "accuracy": 0.8994184938036225,
+        "auroc": 0.969122166072353,
+        "ap": 0.8679185429535746,
+        "threshold": 0.5
+      },
+      "psychomotor_change": {
+        "n": 6000,
+        "n_positive": 322,
+        "positive_rate": 0.05366666666666667,
+        "precision": 0.6487425149700599,
+        "recall": 0.9982608695652174,
+        "f1": 0.7864152231850702,
+        "accuracy": 0.9778333333333333,
+        "auroc": 1.0,
+        "ap": 0.9154132438000171,
+        "threshold": 0.5
+      },
+      "suicidal_thoughts": {
+        "n": 4196,
+        "n_positive": 1028,
+        "positive_rate": 0.2449952335557674,
+        "precision": 0.8655565142364107,
+        "recall": 0.973307392996109,
+        "f1": 0.9162750446607296,
+        "accuracy": 0.9559008579599618,
+        "auroc": 0.9986682977636285,
+        "ap": 0.9762280355810917,
+        "threshold": 0.5
+      },
+      "nervousness": {
+        "n": 6000,
+        "n_positive": 3554,
+        "positive_rate": 0.5923333333333334,
+        "precision": 0.9607569939659901,
+        "recall": 0.9851097355092854,
+        "f1": 0.9727809760843731,
+        "accuracy": 0.9533333333333334,
+        "auroc": 0.9951882254905163,
+        "ap": 0.999074975624249,
+        "threshold": 0.5
+      },
+      "uncontrollable_worry": {
+        "n": 5999,
+        "n_positive": 2455,
+        "positive_rate": 0.40923487247874646,
+        "precision": 0.9021092278719397,
+        "recall": 0.9739714867617109,
+        "f1": 0.9366640348024315,
+        "accuracy": 0.9389881646941157,
+        "auroc": 0.991571676175677,
+        "ap": 0.9817057027291589,
+        "threshold": 0.5
+      },
+      "excessive_worry": {
+        "n": 6000,
+        "n_positive": 2441,
+        "positive_rate": 0.4068333333333333,
+        "precision": 0.8948594979393031,
+        "recall": 0.9765751741089718,
+        "f1": 0.9339332898504716,
+        "accuracy": 0.9366666666666666,
+        "auroc": 0.9921005859095099,
+        "ap": 0.9825237179051506,
+        "threshold": 0.5
+      },
+      "trouble_relaxing": {
+        "n": 6000,
+        "n_positive": 4207,
+        "positive_rate": 0.7011666666666667,
+        "precision": 0.981187748421791,
+        "recall": 0.9971808889945329,
+        "f1": 0.9891196743995782,
+        "accuracy": 0.9663333333333334,
+        "auroc": 1.0,
+        "ap": 1.0,
+        "threshold": 0.5
+      },
+      "restlessness": {
+        "n": 6000,
+        "n_positive": 3710,
+        "positive_rate": 0.6183333333333333,
+        "precision": 0.9526722338204593,
+        "recall": 0.9833423180592992,
+        "f1": 0.9677643402485373,
+        "accuracy": 0.9443333333333334,
+        "auroc": 0.9884853870690569,
+        "ap": 0.9953278833853734,
+        "threshold": 0.5
+      },
+      "irritability": {
+        "n": 4196,
+        "n_positive": 1740,
+        "positive_rate": 0.41468064823641565,
+        "precision": 0.8693303571428571,
+        "recall": 0.894712643678161,
+        "f1": 0.8818388913501118,
+        "accuracy": 0.8936987607244995,
+        "auroc": 0.9637623085851211,
+        "ap": 0.9497615499539228,
+        "threshold": 0.5
+      },
+      "fear_apprehension": {
+        "n": 6000,
+        "n_positive": 1413,
+        "positive_rate": 0.2355,
+        "precision": 0.7367381974248928,
+        "recall": 0.9655060155697098,
+        "f1": 0.8357498366962859,
+        "accuracy": 0.9091666666666667,
+        "auroc": 0.9809041105274436,
+        "ap": 0.9185872095695758,
+        "threshold": 0.5
+      },
+      "hopelessness": {
+        "n": 4196,
+        "n_positive": 2900,
+        "positive_rate": 0.6911344137273594,
+        "precision": 0.9294288611017236,
+        "recall": 0.9479310344827586,
+        "f1": 0.9385887744320807,
+        "accuracy": 0.8963203050524309,
+        "auroc": 0.9625670498084291,
+        "ap": 0.9883925143990605,
+        "threshold": 0.5
+      },
+      "emptiness": {
+        "n": 4196,
+        "n_positive": 1563,
+        "positive_rate": 0.3724976167778837,
+        "precision": 0.8577885783718104,
+        "recall": 0.9022776711452335,
+        "f1": 0.8794708506462987,
+        "accuracy": 0.9025166825548141,
+        "auroc": 0.9691473835095139,
+        "ap": 0.9496572340615319,
+        "threshold": 0.5
+      },
+      "loneliness": {
+        "n": 4196,
+        "n_positive": 1915,
+        "positive_rate": 0.45638703527168734,
+        "precision": 0.9360913436006373,
+        "recall": 0.9207832898172323,
+        "f1": 0.9283742169965422,
+        "accuracy": 0.9270638703527169,
+        "auroc": 0.9826435773783428,
+        "ap": 0.9820764963787888,
+        "threshold": 0.5
+      },
+      "low_self_esteem": {
+        "n": 1833,
+        "n_positive": 415,
+        "positive_rate": 0.22640480087288598,
+        "precision": 0.7436084452975048,
+        "recall": 0.928433734939759,
+        "f1": 0.8258059208797507,
+        "accuracy": 0.910709219858156,
+        "auroc": 0.9736990840654579,
+        "ap": 0.8982822298864384,
+        "threshold": 0.5
+      },
+      "thwarted_belongingness": {
+        "n": 1942,
+        "n_positive": 1058,
+        "positive_rate": 0.544799176107106,
+        "precision": 0.8983269961977186,
+        "recall": 0.8933459357277883,
+        "f1": 0.8958295419971783,
+        "accuracy": 0.8750875386199795,
+        "auroc": 0.9524798347432618,
+        "ap": 0.963315671892271,
+        "threshold": 0.5
+      },
+      "perceived_burdensomeness": {
+        "n": 1942,
+        "n_positive": 629,
+        "positive_rate": 0.3238928939237899,
+        "precision": 0.849971181556196,
+        "recall": 0.9357392686804452,
+        "f1": 0.8907954945589854,
+        "accuracy": 0.921946446961895,
+        "auroc": 0.9756219994018479,
+        "ap": 0.9384345369628491,
+        "threshold": 0.5
+      }
+    },
+    "groups": {
+      "all": {
+        "n_symptoms": 22,
+        "macro_f1": 0.8917876997460286,
+        "macro_precision": 0.8446224737868083,
+        "macro_recall": 0.952035207721424,
+        "macro_auroc": 0.979208193833574,
+        "macro_ap": 0.9550064325846283,
+        "micro_f1": 0.9179586967155419
+      },
+      "gold_supervised": {
+        "n_symptoms": 11,
+        "macro_f1": 0.8878044633194851,
+        "macro_precision": 0.8577395112809476,
+        "macro_recall": 0.9246306305339501,
+        "macro_auroc": 0.967468019622737,
+        "macro_ap": 0.9503350357972518,
+        "micro_f1": 0.904568992117591
+      },
+      "weak_only": {
+        "n_symptoms": 11,
+        "macro_f1": 0.8957709361725719,
+        "macro_precision": 0.8315054362926694,
+        "macro_recall": 0.9794397849088976,
+        "macro_auroc": 0.9909483680444112,
+        "macro_ap": 0.9596778293720051,
+        "micro_f1": 0.9278679676146979
+      },
+      "instrument_PHQ9": {
+        "n_symptoms": 9,
+        "macro_f1": 0.860290394607778,
+        "macro_precision": 0.7854249733996624,
+        "macro_recall": 0.9599850413773819,
+        "macro_auroc": 0.9793787824082723,
+        "macro_ap": 0.9403335326792727,
+        "micro_f1": 0.879204679251016
+      },
+      "instrument_GAD7": {
+        "n_symptoms": 7,
+        "macro_f1": 0.9311215776331129,
+        "macro_precision": 0.8996648937981762,
+        "macro_recall": 0.96805689466881,
+        "macro_auroc": 0.9874303276796178,
+        "macro_ap": 0.9752830055953472,
+        "micro_f1": 0.946592969817414
+      },
+      "instrument_extra": {
+        "n_symptoms": 6,
+        "macro_f1": 0.893144133251806,
+        "macro_precision": 0.8692025676875984,
+        "macro_recall": 0.9214184891322028,
+        "macro_auroc": 0.9693598214844755,
+        "macro_ap": 0.9533597805968234,
+        "micro_f1": 0.9102814041195243
+      }
+    },
+    "tasks": {
+      "severity_depression": {
+        "n": 2456,
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "mae": 0.0,
+        "qwk": 1.0
+      },
+      "severity_risk": {
+        "n": 340,
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "mae": 0.0,
+        "qwk": 1.0
+      },
+      "stress": {
+        "n": 2456,
+        "n_positive": 1294,
+        "positive_rate": 0.5268729641693811,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "accuracy": 1.0,
+        "auroc": 1.0,
+        "ap": 1.0
+      }
+    },
+    "composite": 0.9639292332486762,
+    "selection_score": 0.9569986311932008
+  },
+  "val": {
+    "per_symptom": {
+      "anhedonia": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "depressed_mood": {
+        "n": 903,
+        "n_positive": 706,
+        "positive_rate": 0.7818383167220376,
+        "precision": 0.8990322580645161,
+        "recall": 0.9463456090651559,
+        "f1": 0.9220824038066809,
+        "accuracy": 0.8527464008859358,
+        "auroc": 0.8855554277332798,
+        "ap": 0.9684469442803683,
+        "threshold": 0.550000011920929
+      },
+      "sleep_disturbance": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "fatigue": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "appetite_change": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "worthlessness_guilt": {
+        "n": 903,
+        "n_positive": 460,
+        "positive_rate": 0.5094130675526024,
+        "precision": 0.7977777777777778,
+        "recall": 0.8569565217391305,
+        "f1": 0.8263089364435232,
+        "accuracy": 0.8051273532668881,
+        "auroc": 0.8887466876042791,
+        "ap": 0.899297646899035,
+        "threshold": 0.5
+      },
+      "concentration_problems": {
+        "n": 903,
+        "n_positive": 162,
+        "positive_rate": 0.17940199335548174,
+        "precision": 0.47454545454545455,
+        "recall": 0.7607407407407407,
+        "f1": 0.5844897514173572,
+        "accuracy": 0.8040199335548173,
+        "auroc": 0.8474318988354076,
+        "ap": 0.6095136561901696,
+        "threshold": 0.44999998807907104
+      },
+      "psychomotor_change": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "suicidal_thoughts": {
+        "n": 903,
+        "n_positive": 224,
+        "positive_rate": 0.24806201550387597,
+        "precision": 0.7885950413223141,
+        "recall": 0.8503571428571429,
+        "f1": 0.8183123738242355,
+        "accuracy": 0.9059025470653378,
+        "auroc": 0.9555409741216074,
+        "ap": 0.8693057979930705,
+        "threshold": 0.800000011920929
+      },
+      "nervousness": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "uncontrollable_worry": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "excessive_worry": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "trouble_relaxing": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "restlessness": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "irritability": {
+        "n": 903,
+        "n_positive": 345,
+        "positive_rate": 0.38205980066445183,
+        "precision": 0.7376165803108808,
+        "recall": 0.8228985507246377,
+        "f1": 0.7779272406356074,
+        "accuracy": 0.8139867109634552,
+        "auroc": 0.8971383304763387,
+        "ap": 0.8551813754022758,
+        "threshold": 0.44999998807907104
+      },
+      "fear_apprehension": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "hopelessness": {
+        "n": 903,
+        "n_positive": 639,
+        "positive_rate": 0.707641196013289,
+        "precision": 0.8362450066577897,
+        "recall": 0.9793114241001565,
+        "f1": 0.9021413760461278,
+        "accuracy": 0.8283831672203765,
+        "auroc": 0.8909100393607436,
+        "ap": 0.955831265042296,
+        "threshold": 0.30000001192092896
+      },
+      "emptiness": {
+        "n": 903,
+        "n_positive": 357,
+        "positive_rate": 0.3953488372093023,
+        "precision": 0.7616267942583732,
+        "recall": 0.8883473389355743,
+        "f1": 0.820120900479508,
+        "accuracy": 0.8383499446290144,
+        "auroc": 0.9251558059121084,
+        "ap": 0.8923190964232276,
+        "threshold": 0.4000000059604645
+      },
+      "loneliness": {
+        "n": 903,
+        "n_positive": 451,
+        "positive_rate": 0.4994462901439646,
+        "precision": 0.845531914893617,
+        "recall": 0.8803104212860311,
+        "f1": 0.8625707465937432,
+        "accuracy": 0.8494241417497231,
+        "auroc": 0.9312418813649118,
+        "ap": 0.9390488798619214,
+        "threshold": 0.4000000059604645
+      },
+      "low_self_esteem": {
+        "n": 431,
+        "n_positive": 105,
+        "positive_rate": 0.24361948955916474,
+        "precision": 0.713069306930693,
+        "recall": 0.6866666666666666,
+        "f1": 0.6996189757615768,
+        "accuracy": 0.8568677494199536,
+        "auroc": 0.8756441717791411,
+        "ap": 0.7545813327939542,
+        "threshold": 0.8500000238418579
+      },
+      "thwarted_belongingness": {
+        "n": 485,
+        "n_positive": 276,
+        "positive_rate": 0.5690721649484536,
+        "precision": 0.8384931506849316,
+        "recall": 0.8859420289855072,
+        "f1": 0.8615647975242863,
+        "accuracy": 0.8244329896907217,
+        "auroc": 0.904216767214479,
+        "ap": 0.9342742910679496,
+        "threshold": 0.4000000059604645
+      },
+      "perceived_burdensomeness": {
+        "n": 485,
+        "n_positive": 185,
+        "positive_rate": 0.38144329896907214,
+        "precision": 0.8416216216216217,
+        "recall": 0.8416216216216217,
+        "f1": 0.8416216216216216,
+        "accuracy": 0.8739175257731959,
+        "auroc": 0.9242702702702703,
+        "ap": 0.8580501503317193,
+        "threshold": 0.6499999761581421
+      }
+    },
+    "groups": {
+      "all": {
+        "n_symptoms": 11,
+        "macro_f1": 0.8106144658322062,
+        "macro_precision": 0.7758322642789064,
+        "macro_recall": 0.8544998242474876,
+        "macro_auroc": 0.9023502049702333,
+        "macro_ap": 0.866895494207817,
+        "micro_f1": 0.8419907968031001
+      },
+      "gold_supervised": {
+        "n_symptoms": 11,
+        "macro_f1": 0.8106144658322062,
+        "macro_precision": 0.7758322642789064,
+        "macro_recall": 0.8544998242474876,
+        "macro_auroc": 0.9023502049702333,
+        "macro_ap": 0.866895494207817,
+        "micro_f1": 0.8419907968031001
+      },
+      "weak_only": {
+        "n_symptoms": 0,
+        "macro_f1": null,
+        "macro_auroc": null,
+        "macro_ap": null,
+        "micro_f1": null,
+        "macro_precision": null,
+        "macro_recall": null
+      },
+      "instrument_PHQ9": {
+        "n_symptoms": 4,
+        "macro_f1": 0.7877983663729493,
+        "macro_precision": 0.7399876329275156,
+        "macro_recall": 0.8536000036005424,
+        "macro_auroc": 0.8943187470736434,
+        "macro_ap": 0.8366410113406608,
+        "micro_f1": 0.8358932362754019
+      },
+      "instrument_GAD7": {
+        "n_symptoms": 1,
+        "macro_f1": 0.7779272406356074,
+        "macro_precision": 0.7376165803108808,
+        "macro_recall": 0.8228985507246377,
+        "macro_auroc": 0.8971383304763387,
+        "macro_ap": 0.8551813754022758,
+        "micro_f1": 0.7778659370725034
+      },
+      "instrument_extra": {
+        "n_symptoms": 6,
+        "macro_f1": 0.831273069671144,
+        "macro_precision": 0.806097965841171,
+        "macro_recall": 0.8603665835992595,
+        "macro_auroc": 0.9085731559836091,
+        "macro_ap": 0.8890175025868446,
+        "micro_f1": 0.8578250591016549
+      }
+    },
+    "tasks": {
+      "severity_depression": {
+        "n": 529,
+        "accuracy": 0.7585822306238186,
+        "macro_f1": 0.5041413435724442,
+        "mae": 0.4280151228733459,
+        "qwk": 0.492318665981346
+      },
+      "severity_risk": {
+        "n": 86,
+        "accuracy": 0.4053488372093023,
+        "macro_f1": 0.31393939393939396,
+        "mae": 0.9334883720930233,
+        "qwk": 0.27698029712359085
+      },
+      "stress": {
+        "n": 529,
+        "n_positive": 265,
+        "positive_rate": 0.500945179584121,
+        "precision": 0.7947682119205298,
+        "recall": 0.9043396226415095,
+        "f1": 0.8460209178435589,
+        "accuracy": 0.8341965973534972,
+        "auroc": 0.9162535734705546,
+        "ap": 0.9021334365812025
+      }
+    },
+    "composite": 0.5266378096457144,
+    "selection_score": 0.7350944455945951
+  },
+  "test": {
+    "per_symptom": {
+      "anhedonia": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "depressed_mood": {
+        "n": 906,
+        "n_positive": 697,
+        "positive_rate": 0.7693156732891833,
+        "precision": 0.8829579375848032,
+        "recall": 0.9324820659971306,
+        "f1": 0.9070445073405413,
+        "accuracy": 0.8311920529801324,
+        "auroc": 0.8879664042066822,
+        "ap": 0.9697172210425884,
+        "threshold": 0.550000011920929
+      },
+      "sleep_disturbance": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "fatigue": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "appetite_change": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "worthlessness_guilt": {
+        "n": 906,
+        "n_positive": 434,
+        "positive_rate": 0.47902869757174393,
+        "precision": 0.7657627118644068,
+        "recall": 0.8310599078341014,
+        "f1": 0.7970762449056258,
+        "accuracy": 0.7870419426048565,
+        "auroc": 0.8837649379051785,
+        "ap": 0.8783756590305517,
+        "threshold": 0.5
+      },
+      "concentration_problems": {
+        "n": 906,
+        "n_positive": 171,
+        "positive_rate": 0.18874172185430463,
+        "precision": 0.48484375,
+        "recall": 0.715906432748538,
+        "f1": 0.57814317164358,
+        "accuracy": 0.8013907284768212,
+        "auroc": 0.8509436289135537,
+        "ap": 0.632337771716668,
+        "threshold": 0.44999998807907104
+      },
+      "psychomotor_change": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "suicidal_thoughts": {
+        "n": 906,
+        "n_positive": 232,
+        "positive_rate": 0.2560706401766004,
+        "precision": 0.8116666666666666,
+        "recall": 0.8389655172413794,
+        "f1": 0.8250903520072421,
+        "accuracy": 0.9084547461368654,
+        "auroc": 0.9521364985163204,
+        "ap": 0.8751799590745991,
+        "threshold": 0.800000011920929
+      },
+      "nervousness": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "uncontrollable_worry": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "excessive_worry": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "trouble_relaxing": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "restlessness": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "irritability": {
+        "n": 906,
+        "n_positive": 345,
+        "positive_rate": 0.38079470198675497,
+        "precision": 0.756543909348442,
+        "recall": 0.7736231884057971,
+        "f1": 0.7649882319102514,
+        "accuracy": 0.8135320088300221,
+        "auroc": 0.8699085483995971,
+        "ap": 0.8219155220397927,
+        "threshold": 0.44999998807907104
+      },
+      "fear_apprehension": {
+        "n": 0,
+        "n_positive": 0,
+        "positive_rate": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "auroc": null,
+        "ap": null,
+        "accuracy": null,
+        "threshold": 0.5
+      },
+      "hopelessness": {
+        "n": 906,
+        "n_positive": 634,
+        "positive_rate": 0.6997792494481236,
+        "precision": 0.8315746971736204,
+        "recall": 0.9711041009463722,
+        "f1": 0.8959395312251155,
+        "accuracy": 0.8212582781456954,
+        "auroc": 0.884211356466877,
+        "ap": 0.9515112695493744,
+        "threshold": 0.30000001192092896
+      },
+      "emptiness": {
+        "n": 906,
+        "n_positive": 341,
+        "positive_rate": 0.37637969094922735,
+        "precision": 0.7404030226700252,
+        "recall": 0.8587096774193549,
+        "f1": 0.7951800279264319,
+        "accuracy": 0.8267770419426048,
+        "auroc": 0.9133296135779722,
+        "ap": 0.8749184760944215,
+        "threshold": 0.4000000059604645
+      },
+      "loneliness": {
+        "n": 906,
+        "n_positive": 420,
+        "positive_rate": 0.46357615894039733,
+        "precision": 0.8091304347826087,
+        "recall": 0.8842857142857143,
+        "f1": 0.8450403462441315,
+        "accuracy": 0.8400220750551877,
+        "auroc": 0.9174221046443269,
+        "ap": 0.9275112538399213,
+        "threshold": 0.4000000059604645
+      },
+      "low_self_esteem": {
+        "n": 935,
+        "n_positive": 185,
+        "positive_rate": 0.19786096256684493,
+        "precision": 0.5975401069518717,
+        "recall": 0.6037837837837838,
+        "f1": 0.6006457201430229,
+        "accuracy": 0.8431550802139037,
+        "auroc": 0.8510666666666669,
+        "ap": 0.6313450147401305,
+        "threshold": 0.8500000238418579
+      },
+      "thwarted_belongingness": {
+        "n": 1038,
+        "n_positive": 581,
+        "positive_rate": 0.5597302504816956,
+        "precision": 0.8140199335548173,
+        "recall": 0.8427194492254734,
+        "f1": 0.8281211120999169,
+        "accuracy": 0.7913102119460501,
+        "auroc": 0.8766752034709643,
+        "ap": 0.907700392821463,
+        "threshold": 0.4000000059604645
+      },
+      "perceived_burdensomeness": {
+        "n": 1038,
+        "n_positive": 320,
+        "positive_rate": 0.30828516377649323,
+        "precision": 0.7457142857142858,
+        "recall": 0.81375,
+        "f1": 0.7782480247337685,
+        "accuracy": 0.8539306358381503,
+        "auroc": 0.9070186281337047,
+        "ap": 0.805629201618412,
+        "threshold": 0.6499999761581421
+      }
+    },
+    "groups": {
+      "all": {
+        "n_symptoms": 11,
+        "macro_f1": 0.7832288427436026,
+        "macro_precision": 0.7491052233010499,
+        "macro_recall": 0.8242172579897858,
+        "macro_auroc": 0.8904039628092586,
+        "macro_ap": 0.8432856128698112,
+        "micro_f1": 0.8169859124167304
+      },
+      "gold_supervised": {
+        "n_symptoms": 11,
+        "macro_f1": 0.7832288427436026,
+        "macro_precision": 0.7491052233010499,
+        "macro_recall": 0.8242172579897858,
+        "macro_auroc": 0.8904039628092586,
+        "macro_ap": 0.8432856128698112,
+        "micro_f1": 0.8169859124167304
+      },
+      "weak_only": {
+        "n_symptoms": 0,
+        "macro_f1": null,
+        "macro_auroc": null,
+        "macro_ap": null,
+        "micro_f1": null,
+        "macro_precision": null,
+        "macro_recall": null
+      },
+      "instrument_PHQ9": {
+        "n_symptoms": 4,
+        "macro_f1": 0.7768385689742474,
+        "macro_precision": 0.7363077665289691,
+        "macro_recall": 0.8296034809552875,
+        "macro_auroc": 0.8937028673854337,
+        "macro_ap": 0.8389026527161018,
+        "micro_f1": 0.8208644643408459
+      },
+      "instrument_GAD7": {
+        "n_symptoms": 1,
+        "macro_f1": 0.7649882319102514,
+        "macro_precision": 0.756543909348442,
+        "macro_recall": 0.7736231884057971,
+        "macro_auroc": 0.8699085483995971,
+        "macro_ap": 0.8219155220397927,
+        "micro_f1": 0.7649856733524355
+      },
+      "instrument_extra": {
+        "n_symptoms": 6,
+        "macro_f1": 0.7905291270620646,
+        "macro_precision": 0.7563970801412049,
+        "macro_recall": 0.8290587876101164,
+        "macro_auroc": 0.8916205954934187,
+        "macro_ap": 0.8497692681106205,
+        "micro_f1": 0.8215325670498085
+      }
+    },
+    "tasks": {
+      "severity_depression": {
+        "n": 541,
+        "accuracy": 0.8066728280961183,
+        "macro_f1": 0.6203327926100985,
+        "mae": 0.3663216266173752,
+        "qwk": 0.5476822786679604
+      },
+      "severity_risk": {
+        "n": 74,
+        "accuracy": 0.3208108108108108,
+        "macro_f1": 0.2924741525341225,
+        "mae": 0.8854054054054054,
+        "qwk": 0.501567133723303
+      },
+      "stress": {
+        "n": 541,
+        "n_positive": 290,
+        "positive_rate": 0.5360443622920518,
+        "precision": 0.8014110429447853,
+        "recall": 0.8996551724137931,
+        "f1": 0.8476960902581041,
+        "accuracy": 0.8251571164510166,
+        "auroc": 0.9134345377112241,
+        "ap": 0.9106372013603846
+      }
+    },
+    "composite": 0.6108260850449553,
+    "selection_score": 0.7404383614069405
+  },
+  "selective": {
+    "val": {
+      "aurc": 0.08514154714478081,
+      "risk_at_full_coverage": 0.17520695652173915,
+      "risk_at_80_coverage": 0.147098,
+      "risk_at_50_coverage": 0.073402,
+      "curve": [
+        {
+          "coverage": 0.05,
+          "risk": 0.00686,
+          "n_retained": 431
+        },
+        {
+          "coverage": 0.0999,
+          "risk": 0.013621999999999999,
+          "n_retained": 862
+        },
+        {
+          "coverage": 0.15,
+          "risk": 0.01666,
+          "n_retained": 1294
+        },
+        {
+          "coverage": 0.2,
+          "risk": 0.017051999999999998,
+          "n_retained": 1725
+        },
+        {
+          "coverage": 0.25,
+          "risk": 0.021854,
+          "n_retained": 2156
+        },
+        {
+          "coverage": 0.3001,
+          "risk": 0.030282,
+          "n_retained": 2588
+        },
+        {
+          "coverage": 0.35,
+          "risk": 0.040277999999999994,
+          "n_retained": 3019
+        },
+        {
+          "coverage": 0.4,
+          "risk": 0.051744,
+          "n_retained": 3450
+        },
+        {
+          "coverage": 0.45,
+          "risk": 0.059878,
+          "n_retained": 3881
+        },
+        {
+          "coverage": 0.4999,
+          "risk": 0.073402,
+          "n_retained": 4312
+        },
+        {
+          "coverage": 0.55,
+          "risk": 0.085554,
+          "n_retained": 4744
+        },
+        {
+          "coverage": 0.6,
+          "risk": 0.098686,
+          "n_retained": 5175
+        },
+        {
+          "coverage": 0.65,
+          "risk": 0.11172,
+          "n_retained": 5606
+        },
+        {
+          "coverage": 0.7001,
+          "risk": 0.126322,
+          "n_retained": 6038
+        },
+        {
+          "coverage": 0.75,
+          "risk": 0.13661199999999998,
+          "n_retained": 6469
+        },
+        {
+          "coverage": 0.8,
+          "risk": 0.147098,
+          "n_retained": 6900
+        },
+        {
+          "coverage": 0.85,
+          "risk": 0.155918,
+          "n_retained": 7331
+        },
+        {
+          "coverage": 0.8999,
+          "risk": 0.164052,
+          "n_retained": 7762
+        },
+        {
+          "coverage": 0.95,
+          "risk": 0.170324,
+          "n_retained": 8194
+        },
+        {
+          "coverage": 1.0,
+          "risk": 0.175224,
+          "n_retained": 8625
+        }
+      ]
+    },
+    "test": {
+      "aurc": 0.09156903250004858,
+      "risk_at_full_coverage": 0.1846515254898138,
+      "risk_at_80_coverage": 0.151214,
+      "risk_at_50_coverage": 0.082908,
+      "curve": [
+        {
+          "coverage": 0.05,
+          "risk": 0.013328,
+          "n_retained": 513
+        },
+        {
+          "coverage": 0.1,
+          "risk": 0.011466,
+          "n_retained": 1026
+        },
+        {
+          "coverage": 0.15,
+          "risk": 0.015288,
+          "n_retained": 1539
+        },
+        {
+          "coverage": 0.2,
+          "risk": 0.020971999999999998,
+          "n_retained": 2052
+        },
+        {
+          "coverage": 0.25,
+          "risk": 0.029792,
+          "n_retained": 2565
+        },
+        {
+          "coverage": 0.3,
+          "risk": 0.040082,
+          "n_retained": 3078
+        },
+        {
+          "coverage": 0.35,
+          "risk": 0.048313999999999996,
+          "n_retained": 3591
+        },
+        {
+          "coverage": 0.4,
+          "risk": 0.058506,
+          "n_retained": 4104
+        },
+        {
+          "coverage": 0.45,
+          "risk": 0.067522,
+          "n_retained": 4617
+        },
+        {
+          "coverage": 0.5,
+          "risk": 0.082908,
+          "n_retained": 5129
+        },
+        {
+          "coverage": 0.55,
+          "risk": 0.09486399999999999,
+          "n_retained": 5642
+        },
+        {
+          "coverage": 0.6,
+          "risk": 0.10633,
+          "n_retained": 6155
+        },
+        {
+          "coverage": 0.65,
+          "risk": 0.11848199999999999,
+          "n_retained": 6668
+        },
+        {
+          "coverage": 0.7,
+          "risk": 0.131026,
+          "n_retained": 7181
+        },
+        {
+          "coverage": 0.75,
+          "risk": 0.14062999999999998,
+          "n_retained": 7694
+        },
+        {
+          "coverage": 0.8,
+          "risk": 0.151214,
+          "n_retained": 8207
+        },
+        {
+          "coverage": 0.85,
+          "risk": 0.163072,
+          "n_retained": 8720
+        },
+        {
+          "coverage": 0.9,
+          "risk": 0.173362,
+          "n_retained": 9233
+        },
+        {
+          "coverage": 0.95,
+          "risk": 0.179634,
+          "n_retained": 9746
+        },
+        {
+          "coverage": 1.0,
+          "risk": 0.18463200000000002,
+          "n_retained": 10259
+        }
+      ]
+    }
+  },
+  "thresholds": {
+    "anhedonia": 0.5,
+    "depressed_mood": 0.550000011920929,
+    "sleep_disturbance": 0.5,
+    "fatigue": 0.5,
+    "appetite_change": 0.5,
+    "worthlessness_guilt": 0.5,
+    "concentration_problems": 0.44999998807907104,
+    "psychomotor_change": 0.5,
+    "suicidal_thoughts": 0.800000011920929,
+    "nervousness": 0.5,
+    "uncontrollable_worry": 0.5,
+    "excessive_worry": 0.5,
+    "trouble_relaxing": 0.5,
+    "restlessness": 0.5,
+    "irritability": 0.44999998807907104,
+    "fear_apprehension": 0.5,
+    "hopelessness": 0.30000001192092896,
+    "emptiness": 0.4000000059604645,
+    "loneliness": 0.4000000059604645,
+    "low_self_esteem": 0.8500000238418579,
+    "thwarted_belongingness": 0.4000000059604645,
+    "perceived_burdensomeness": 0.6499999761581421
+  }
+}

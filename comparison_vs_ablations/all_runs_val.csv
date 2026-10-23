@@ -1,0 +1,97 @@
+model,metric,mean,std,formatted
+L0_flat,composite,0.5306,0.009,0.531 +/- 0.009
+L0_flat,selection_score,0.717,0.0041,0.717 +/- 0.004
+L0_flat,symptom_macro_f1[all],0.7818,0.0165,0.782 +/- 0.017
+L0_flat,symptom_macro_auroc[all],0.8828,0.0154,0.883 +/- 0.015
+L0_flat,symptom_macro_f1[gold_supervised],0.7818,0.0165,0.782 +/- 0.017
+L0_flat,symptom_macro_auroc[gold_supervised],0.8828,0.0154,0.883 +/- 0.015
+L0_flat,symptom_macro_f1[weak_only],,,-
+L0_flat,symptom_macro_auroc[weak_only],,,-
+L0_flat,severity_depression_qwk,0.4863,0.0204,0.486 +/- 0.020
+L0_flat,severity_depression_mae,0.4909,0.0116,0.491 +/- 0.012
+L0_flat,severity_depression_macro_f1,0.4821,0.0249,0.482 +/- 0.025
+L0_flat,severity_risk_qwk,0.3235,0.0314,0.324 +/- 0.031
+L0_flat,severity_risk_mae,0.9612,0.0857,0.961 +/- 0.086
+L0_flat,severity_risk_macro_f1,0.308,0.0257,0.308 +/- 0.026
+L0_flat,stress_f1,0.8342,0.0161,0.834 +/- 0.016
+L0_flat,stress_auroc,0.9082,0.0031,0.908 +/- 0.003
+L1_bottleneck,composite,0.5491,0.0273,0.549 +/- 0.027
+L1_bottleneck,selection_score,0.7199,0.0041,0.720 +/- 0.004
+L1_bottleneck,symptom_macro_f1[all],0.7933,0.0015,0.793 +/- 0.002
+L1_bottleneck,symptom_macro_auroc[all],0.896,0.003,0.896 +/- 0.003
+L1_bottleneck,symptom_macro_f1[gold_supervised],0.7933,0.0015,0.793 +/- 0.002
+L1_bottleneck,symptom_macro_auroc[gold_supervised],0.896,0.003,0.896 +/- 0.003
+L1_bottleneck,symptom_macro_f1[weak_only],,,-
+L1_bottleneck,symptom_macro_auroc[weak_only],,,-
+L1_bottleneck,severity_depression_qwk,0.4705,0.0131,0.471 +/- 0.013
+L1_bottleneck,severity_depression_mae,0.4461,0.0136,0.446 +/- 0.014
+L1_bottleneck,severity_depression_macro_f1,0.497,0.0115,0.497 +/- 0.012
+L1_bottleneck,severity_risk_qwk,0.3836,0.0872,0.384 +/- 0.087
+L1_bottleneck,severity_risk_mae,0.876,0.0903,0.876 +/- 0.090
+L1_bottleneck,severity_risk_macro_f1,0.3331,0.0459,0.333 +/- 0.046
+L1_bottleneck,stress_f1,0.8319,0.0117,0.832 +/- 0.012
+L1_bottleneck,stress_auroc,0.9056,0.0035,0.906 +/- 0.003
+L2_graph,composite,0.5708,0.0147,0.571 +/- 0.015
+L2_graph,selection_score,0.7236,0.0054,0.724 +/- 0.005
+L2_graph,symptom_macro_f1[all],0.7948,0.0033,0.795 +/- 0.003
+L2_graph,symptom_macro_auroc[all],0.8958,0.0022,0.896 +/- 0.002
+L2_graph,symptom_macro_f1[gold_supervised],0.7948,0.0033,0.795 +/- 0.003
+L2_graph,symptom_macro_auroc[gold_supervised],0.8958,0.0022,0.896 +/- 0.002
+L2_graph,symptom_macro_f1[weak_only],,,-
+L2_graph,symptom_macro_auroc[weak_only],,,-
+L2_graph,severity_depression_qwk,0.4802,0.0115,0.480 +/- 0.011
+L2_graph,severity_depression_mae,0.4461,0.0218,0.446 +/- 0.022
+L2_graph,severity_depression_macro_f1,0.4888,0.0121,0.489 +/- 0.012
+L2_graph,severity_risk_qwk,0.4375,0.044,0.438 +/- 0.044
+L2_graph,severity_risk_mae,0.8295,0.0269,0.829 +/- 0.027
+L2_graph,severity_risk_macro_f1,0.3362,0.0335,0.336 +/- 0.033
+L2_graph,stress_f1,0.8427,0.0029,0.843 +/- 0.003
+L2_graph,stress_auroc,0.9067,0.006,0.907 +/- 0.006
+L3_weak,composite,0.4942,0.0035,0.494 +/- 0.003
+L3_weak,selection_score,0.7082,0.0039,0.708 +/- 0.004
+L3_weak,symptom_macro_f1[all],0.7906,0.0012,0.791 +/- 0.001
+L3_weak,symptom_macro_auroc[all],0.891,0.0003,0.891 +/- 0.000
+L3_weak,symptom_macro_f1[gold_supervised],0.7906,0.0012,0.791 +/- 0.001
+L3_weak,symptom_macro_auroc[gold_supervised],0.891,0.0003,0.891 +/- 0.000
+L3_weak,symptom_macro_f1[weak_only],,,-
+L3_weak,symptom_macro_auroc[weak_only],,,-
+L3_weak,severity_depression_qwk,0.443,0.0106,0.443 +/- 0.011
+L3_weak,severity_depression_mae,0.4726,0.0246,0.473 +/- 0.025
+L3_weak,severity_depression_macro_f1,0.4794,0.02,0.479 +/- 0.020
+L3_weak,severity_risk_qwk,0.2489,0.0193,0.249 +/- 0.019
+L3_weak,severity_risk_mae,0.9922,0.0585,0.992 +/- 0.059
+L3_weak,severity_risk_macro_f1,0.3052,0.0498,0.305 +/- 0.050
+L3_weak,stress_f1,0.8339,0.0123,0.834 +/- 0.012
+L3_weak,stress_auroc,0.9053,0.0065,0.905 +/- 0.006
+L4_contrastive,composite,0.5443,0.0245,0.544 +/- 0.025
+L4_contrastive,selection_score,0.7117,0.007,0.712 +/- 0.007
+L4_contrastive,symptom_macro_f1[all],0.7778,0.0086,0.778 +/- 0.009
+L4_contrastive,symptom_macro_auroc[all],0.8826,0.0115,0.883 +/- 0.011
+L4_contrastive,symptom_macro_f1[gold_supervised],0.7778,0.0086,0.778 +/- 0.009
+L4_contrastive,symptom_macro_auroc[gold_supervised],0.8826,0.0115,0.883 +/- 0.011
+L4_contrastive,symptom_macro_f1[weak_only],,,-
+L4_contrastive,symptom_macro_auroc[weak_only],,,-
+L4_contrastive,severity_depression_qwk,0.4749,0.0331,0.475 +/- 0.033
+L4_contrastive,severity_depression_mae,0.4638,0.0161,0.464 +/- 0.016
+L4_contrastive,severity_depression_macro_f1,0.4976,0.0291,0.498 +/- 0.029
+L4_contrastive,severity_risk_qwk,0.3801,0.079,0.380 +/- 0.079
+L4_contrastive,severity_risk_mae,0.938,0.0757,0.938 +/- 0.076
+L4_contrastive,severity_risk_macro_f1,0.3056,0.0327,0.306 +/- 0.033
+L4_contrastive,stress_f1,0.8387,0.0037,0.839 +/- 0.004
+L4_contrastive,stress_auroc,0.9098,0.0024,0.910 +/- 0.002
+L5_full,composite,0.5461,0.0275,0.546 +/- 0.027
+L5_full,selection_score,0.7308,0.0055,0.731 +/- 0.006
+L5_full,symptom_macro_f1[all],0.8049,0.0114,0.805 +/- 0.011
+L5_full,symptom_macro_auroc[all],0.8966,0.0109,0.897 +/- 0.011
+L5_full,symptom_macro_f1[gold_supervised],0.8049,0.0114,0.805 +/- 0.011
+L5_full,symptom_macro_auroc[gold_supervised],0.8966,0.0109,0.897 +/- 0.011
+L5_full,symptom_macro_f1[weak_only],,,-
+L5_full,symptom_macro_auroc[weak_only],,,-
+L5_full,severity_depression_qwk,0.491,0.0077,0.491 +/- 0.008
+L5_full,severity_depression_mae,0.4305,0.0097,0.431 +/- 0.010
+L5_full,severity_depression_macro_f1,0.5095,0.0145,0.509 +/- 0.015
+L5_full,severity_risk_qwk,0.3426,0.0884,0.343 +/- 0.088
+L5_full,severity_risk_mae,0.9064,0.1129,0.906 +/- 0.113
+L5_full,severity_risk_macro_f1,0.3104,0.0391,0.310 +/- 0.039
+L5_full,stress_f1,0.8467,0.0037,0.847 +/- 0.004
+L5_full,stress_auroc,0.9186,0.0031,0.919 +/- 0.003

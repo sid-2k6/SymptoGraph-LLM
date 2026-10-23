@@ -1,0 +1,22 @@
+# SymptoGraph-LLM vs baselines
+
+mean +/- std across seeds (validation).
+
+| metric | SymptoGraph-LLM | bilstm_attn | mentalroberta | tfidf_mlp |
+|---|---|---|---|---|
+| composite | 0.546 +/- 0.027 | 0.423 +/- 0.022 | 0.532 +/- 0.008 | 0.439 +/- 0.013 |
+| selection_score | 0.731 +/- 0.006 |  |  |  |
+| severity_depression_macro_f1 | 0.509 +/- 0.015 | 0.390 +/- 0.016 | 0.507 +/- 0.017 | 0.351 +/- 0.009 |
+| severity_depression_mae | 0.431 +/- 0.010 | 0.509 +/- 0.026 | 0.419 +/- 0.017 | 0.539 +/- 0.019 |
+| severity_depression_qwk | 0.491 +/- 0.008 | 0.363 +/- 0.058 | 0.488 +/- 0.020 | 0.300 +/- 0.020 |
+| severity_risk_macro_f1 | 0.310 +/- 0.039 | 0.246 +/- 0.015 | 0.296 +/- 0.023 | 0.300 +/- 0.042 |
+| severity_risk_mae | 0.906 +/- 0.113 | 0.961 +/- 0.100 | 0.857 +/- 0.077 | 0.961 +/- 0.075 |
+| severity_risk_qwk | 0.343 +/- 0.088 | 0.326 +/- 0.037 | 0.399 +/- 0.030 | 0.355 +/- 0.016 |
+| stress_auroc | 0.919 +/- 0.003 | 0.790 +/- 0.013 | 0.897 +/- 0.008 | 0.791 +/- 0.007 |
+| stress_f1 | 0.847 +/- 0.004 | 0.720 +/- 0.016 | 0.822 +/- 0.012 | 0.726 +/- 0.009 |
+| symptom_macro_auroc[all] | 0.897 +/- 0.011 | 0.744 +/- 0.003 | 0.862 +/- 0.021 | 0.777 +/- 0.004 |
+| symptom_macro_auroc[gold_supervised] | 0.897 +/- 0.011 | 0.744 +/- 0.003 | 0.862 +/- 0.021 | 0.777 +/- 0.004 |
+| symptom_macro_auroc[weak_only] | - | - | - | - |
+| symptom_macro_f1[all] | 0.805 +/- 0.011 | 0.579 +/- 0.046 | 0.708 +/- 0.039 | 0.662 +/- 0.005 |
+| symptom_macro_f1[gold_supervised] | 0.805 +/- 0.011 | 0.579 +/- 0.046 | 0.708 +/- 0.039 | 0.662 +/- 0.005 |
+| symptom_macro_f1[weak_only] | - | - | - | - |

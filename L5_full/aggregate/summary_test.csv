@@ -1,0 +1,17 @@
+model,metric,mean,std,formatted
+L5_full,composite,0.5685,0.0561,0.569 +/- 0.056
+L5_full,selection_score,0.7307,0.01,0.731 +/- 0.010
+L5_full,symptom_macro_f1[all],0.7753,0.0116,0.775 +/- 0.012
+L5_full,symptom_macro_auroc[all],0.8862,0.0083,0.886 +/- 0.008
+L5_full,symptom_macro_f1[gold_supervised],0.7753,0.0116,0.775 +/- 0.012
+L5_full,symptom_macro_auroc[gold_supervised],0.8862,0.0083,0.886 +/- 0.008
+L5_full,symptom_macro_f1[weak_only],,,-
+L5_full,symptom_macro_auroc[weak_only],,,-
+L5_full,severity_depression_qwk,0.5307,0.0361,0.531 +/- 0.036
+L5_full,severity_depression_mae,0.3817,0.0136,0.382 +/- 0.014
+L5_full,severity_depression_macro_f1,0.6024,0.0237,0.602 +/- 0.024
+L5_full,severity_risk_qwk,0.3995,0.1364,0.400 +/- 0.136
+L5_full,severity_risk_mae,0.9259,0.1201,0.926 +/- 0.120
+L5_full,severity_risk_macro_f1,0.2545,0.0349,0.255 +/- 0.035
+L5_full,stress_f1,0.8541,0.0121,0.854 +/- 0.012
+L5_full,stress_auroc,0.9197,0.0076,0.920 +/- 0.008

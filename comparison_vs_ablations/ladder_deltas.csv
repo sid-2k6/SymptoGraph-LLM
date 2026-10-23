@@ -1,0 +1,7 @@
+rung,composite,delta_vs_previous
+L0_flat,0.5306,
+L1_bottleneck,0.5491,0.0185
+L2_graph,0.5708,0.0217
+L3_weak,0.4942,-0.0766
+L4_contrastive,0.5443,0.0501
+L5_full,0.5461,0.0018
