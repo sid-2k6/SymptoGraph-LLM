@@ -1,55 +1,55 @@
-# Placeholder index for SymptoGraph-LLM_Paper.docx
+# Placeholder index
 
-Every performance number in the paper is written as `X.XXX` (or
-`X.XXX ± X.XXX`). Search the document for `X.XXX` to find them all. Dataset
-counts, corpus-overlap measurements and the labelling-model noise channel are
-**measured quantities and are already real** — do not overwrite them.
+`docs/SymptoGraph-LLM_Paper.docx` follows the structure and formatting of
+`PRISM - Copy.docx`. Every **performance** number is `X.XXX` or
+`X.XXX ± X.XXX`. Search for `X.XXX`.
 
-Regenerate the document after editing the builder:
+Dataset counts, corpus overlaps, the graph edge weights and the labeller noise
+channel are **measured facts and already real** - do not overwrite them.
 
-```
-python scripts/build_paper.py
-```
+Regenerate: `python scripts/build_paper.py`
 
 ## Tables
 
-| Table | Fills from | Produced by |
+| Table | Status | Fills from |
 |---|---|---|
-| 1. Literature comparison | no numbers | — |
-| 2. Corpus overlap | already real | `src/symptograph/preprocess.py` docstring |
-| 3. Dataset partitioning | already real | `processed/manifest.json` |
-| 4. Shared configuration | already real | `TrainConfig` / `ProposedConfig` |
-| **5. Baselines and comparison models** | `comparison/comparison_table.csv` and `comparison/test_comparison.csv` | notebook 09 §7 |
-| **6. Ablation ladder and controls** | `proposed_v2_e8/comparison_ladder/` aggregates | notebook 08 §9, §11 |
-| **7. Per-task confidence intervals** | `proposed_v2_e8/comparison_ladder/bootstrap_cis.csv` | notebook 08 §9 |
-| **8. Paired bootstrap** | `comparison/paired_vs_proposed.csv` and `proposed_v2_e8/comparison_ladder/paired_bootstrap.csv` | notebook 08 §10, notebook 09 §8 |
+| 1. Literature comparison | final, no numbers | - |
+| 2. Dataset partitioning | real | `processed/manifest.json` |
+| 3. Task composition | real | `processed/label_coverage.csv` |
+| 4. Layer-wise architecture | real | `src/symptograph/proposed.py` |
+| 5. Parameter distribution | real | `config.json` field `trainable_parameters` |
+| 6. Hyperparameter configuration | real | `ProposedConfig` |
+| **7. Training progression** | placeholder | `proposed_v2_e8/*/seed_*/history.csv` |
+| **8. Final performance** | placeholder | `proposed_v2_e8/*/aggregate/aggregate_metrics.json` |
+| **9. Ablation study** | placeholder | notebook 08 sections 9 and 11 |
+| **10. State-of-the-art comparison** | placeholder | `comparison/comparison_table.csv`, notebook 09 |
 
 ## Figures
 
 | Figure | Status | Replace with |
 |---|---|---|
-| 1. Architecture | **final** | — |
-| 2. Against baselines | placeholder | `comparison/comparison_vs_*/comparison.png` |
-| 3. Ablation ladder | placeholder | `proposed_v2_e8/comparison_ladder/*.png` |
-| 4. Item loadings | placeholder | `proposed_v2_e8/item_loadings_*.png` |
-| 5. Training dynamics | placeholder | `proposed_v2_e8/M4_denoised/seed_0/plots/` |
+| 1. Overall workflow | **final** | - |
+| 2. Architecture | **final** | - |
+| 3. Convergence curves (2 panels) | placeholder | `proposed_v2_e8/M4_denoised/seed_0/plots/` |
+| 4. Ablation fidelity | placeholder | `proposed_v2_e8/comparison_ladder/*.png` |
+| 5. SOTA comparison + CIs (2 panels) | placeholder | `comparison/comparison_vs_*/`, `bootstrap_cis.csv` |
 
-## Prose placeholders
+## Citation placement, as instructed
 
-Section 4 paragraphs carry `X.XXX` inline for: the headline symptom
-macro-AUROC and its margin over the strongest comparison model (4.1); the
-largest and smallest contributing ablation step (4.2); the count of established
-differences and the suicide-risk CI width (4.3); the largest and smallest item
-loading and the dispersion around uniform weighting (4.4); the count of runs
-above the memorisation threshold and the mean loss ratio (4.5). The abstract and
-conclusion repeat the headline figures.
+- `[1]`-`[5]` Introduction only
+- `[6]`-`[20]` Literature Survey prose, in order across the 7 paragraphs
+- `[21]`-`[30]` Table 1, in order, plus the `Proposed` row
+- `[11]`, `[18]`, `[21]` re-appear in sections 4.1 and 4.6 only to name the
+  three re-implemented comparison models
 
-## Claims that must be checked before submission, not filled in
+## Claims to check rather than fill
 
-1. **Section 4.4** — if the loading dispersion is near zero the head never left
-   its initialisation, and the interpretability claim must be **withdrawn**
-   rather than reported. The paragraph is written to accommodate either outcome.
-2. **Section 4.1** — the comparison models are re-implementations, not
+1. **4.5 / 4.6** - if the learned item loadings show near-zero dispersion
+   around uniform weighting, the head never left its initialisation and the
+   interpretability claim must be **withdrawn**, not reported.
+2. **4.1** - the three comparison models are re-implementations, not
    reproductions. That sentence must stay.
-3. **Section 4.6** — the matched-data caveat must stay until a run with weak
-   labels enabled for the baselines exists.
+3. **4.3 / 4.5** - the weak-only symptom subset is marked "not measurable"
+   because eleven symptoms have no gold labels anywhere. Keep it.
+4. **Future work** - the matched-data caveat stands until the baselines also
+   see weak labels.
