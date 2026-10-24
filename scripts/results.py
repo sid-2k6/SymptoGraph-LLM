@@ -139,13 +139,20 @@ def sd(model: str, metric: str) -> str:
 
 
 def margin(metric: str, a: str = "L5_full", b: str = "mentalroberta") -> str:
-    """Absolute difference between two models on one metric, three decimals."""
+    """Absolute difference between two models on one metric.
+
+    Computed from the values **as printed in the tables**, i.e. rounded to
+    three decimals first, so that a reader subtracting two table entries gets
+    exactly the number quoted in the prose. Differencing the unrounded means
+    instead produces off-by-one-in-the-last-digit mismatches, which a reviewer
+    will and did notice.
+    """
     va, vb = mean(a, metric), mean(b, metric)
     if va is None:
         va = mean("SymptoGraph-LLM", metric)
     if va is None or vb is None:
         return "\u2013"
-    return f"{abs(va - vb):.3f}"
+    return f"{abs(round(va, 3) - round(vb, 3)):.3f}"
 
 
 def best_rung(metric: str) -> str:
@@ -159,30 +166,68 @@ def best_rung(metric: str) -> str:
     return pick[0]
 
 
-def rungs_led_by_l5() -> tuple[int, int]:
-    """(how many of the reported metrics L5 leads, how many were compared)."""
-    led = total = 0
-    for k in METRICS:
-        if mean("L5_full", k) is None:
+# the metrics actually printed in each results table, so counts quoted in the
+# prose match the table a reader is looking at rather than some larger set
+TABLE9_METRICS = [
+    "symptom_macro_f1[all]", "symptom_macro_auroc[all]",
+    "severity_depression_qwk", "severity_depression_mae",
+    "severity_depression_macro_f1", "severity_risk_qwk",
+    "severity_risk_mae", "stress_auroc", "composite",
+]
+TABLE10_METRICS = [
+    "symptom_macro_f1[all]", "symptom_macro_auroc[all]",
+    "severity_depression_qwk", "severity_depression_mae",
+    "severity_depression_macro_f1", "severity_risk_qwk",
+    "severity_risk_mae", "stress_auroc", "stress_f1", "composite",
+]
+
+
+def rungs_led_by_l5() -> tuple[int, int, int, list[str]]:
+    """(outright wins, metrics in Table 9, ties, names of metrics not led).
+
+    A tie is counted separately from a win. Rounding to three decimals first
+    means a 'win' is one a reader can see in the table, not one that exists
+    only in undisplayed digits.
+    """
+    wins = ties = 0
+    lost: list[str] = []
+    for k in TABLE9_METRICS:
+        lower = METRICS[k][1]
+        vals = [(r, mean(r, k)) for r in RUNGS if mean(r, k) is not None]
+        if not vals:
             continue
-        total += 1
-        if best_rung(k) == "L5_full":
-            led += 1
-    return led, total
+        rounded = [(r, round(v, 3)) for r, v in vals]
+        mine = dict(rounded)["L5_full"]
+        best = min(v for _, v in rounded) if lower else max(
+            v for _, v in rounded)
+        if mine != best:
+            lost.append(METRICS[k][0])
+        elif sum(1 for _, v in rounded if v == best) > 1:
+            ties += 1
+        else:
+            wins += 1
+    return wins, len(TABLE9_METRICS), ties, lost
 
 
 def beats_all_baselines() -> tuple[int, int, list[str]]:
-    """(metrics where the proposal leads every baseline, total, the losses)."""
+    """(metrics in Table 10 where the proposal leads every reference model,
+    the number of metrics in that table, and the names of the rest).
+
+    Comparison is on three-decimal values, matching the printed table.
+    """
     led = total = 0
     lost: list[str] = []
-    for k, (label, lower) in METRICS.items():
+    for k in TABLE10_METRICS:
+        label, lower = METRICS[k]
         p = mean("SymptoGraph-LLM", k)
         bs = [mean(b, k) for b in BASELINES]
         bs = [v for v in bs if v is not None]
         if p is None or not bs:
             continue
         total += 1
-        ok = all(p < v for v in bs) if lower else all(p > v for v in bs)
+        pr = round(p, 3)
+        br = [round(v, 3) for v in bs]
+        ok = all(pr < v for v in br) if lower else all(pr > v for v in br)
         if ok:
             led += 1
         else:
@@ -351,7 +396,7 @@ ABSTAIN_REDUCTION = (
 
 
 def summary() -> str:
-    led, total = rungs_led_by_l5()
+    led, total, ties, lost_rungs = rungs_led_by_l5()
     bled, btotal, blost = beats_all_baselines()
     lines = [
         "RESULTS LOADED",

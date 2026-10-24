@@ -58,11 +58,21 @@ def main() -> int:
     print(f"placeholders in tables   : {table_ph}")
     print(f"placeholders total       : {prose_ph + table_ph}")
 
+    with zipfile.ZipFile(path) as zf:
+        doc_xml = zf.read("word/document.xml").decode("utf-8", "replace")
+    n_omml = doc_xml.count("<m:oMath")
+
+    print(f"native OMML equations    : {n_omml}")
+
+    # 7 media files: figures 1, 2, 3a, 3b, 4, 5a, 5b. Equations are OMML now,
+    # so an equation image appearing here would mean a regression.
     ok = (
         eq_nums == list(range(1, 21))
         and fig_nums == list(range(1, 6))
         and tbl_nums == list(range(1, 11))
-        and len(media) == 27
+        and len(media) == 7
+        and n_omml == 20
+        and prose_ph + table_ph == 0
     )
     print(f"\nall ordering checks pass : {ok}")
     return 0 if ok else 1

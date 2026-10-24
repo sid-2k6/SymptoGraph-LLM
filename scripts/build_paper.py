@@ -69,16 +69,19 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 from docx import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 from docx.shared import Inches, Pt
 
+import diagrams
 import results as R
+from omml import is_well_formed, latex_to_omml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DOCS = os.path.join(ROOT, "docs")
 FIGS = os.path.join(DOCS, "paper_figures")
-EQS = os.path.join(FIGS, "equations")
 SURVEY = os.path.join(DOCS, "Literature_Survey_SymptoGraph-LLM.md")
 OUT = os.path.join(DOCS, "SymptoGraph-LLM_Paper.docx")
 
@@ -120,18 +123,16 @@ EQUATIONS = {
 }
 
 
-def render_equations() -> dict[int, str]:
-    os.makedirs(EQS, exist_ok=True)
-    out = {}
+def check_equations() -> dict[int, str]:
+    """Validate every equation converts to well-formed OMML, then hand back
+    the LaTeX. Equations are native Word math now, so nothing is rendered to
+    an image; this exists so a malformed equation fails the build loudly."""
     for n, tex in EQUATIONS.items():
-        path = os.path.join(EQS, f"eq{n:02d}.png")
-        fig = plt.figure(figsize=(0.01, 0.01))
-        fig.text(0, 0, tex, fontsize=15, family="serif")
-        fig.savefig(path, dpi=300, bbox_inches="tight", pad_inches=0.06,
-                    transparent=False, facecolor="white")
-        plt.close(fig)
-        out[n] = path
-    return out
+        xml = latex_to_omml(tex)
+        if not is_well_formed(xml):
+            raise ValueError(f"equation {n} produced malformed OMML")
+    print(f"validated {len(EQUATIONS)} equations as native OMML")
+    return dict(EQUATIONS)
 
 
 # --------------------------------------------------------------------------- #
@@ -143,186 +144,13 @@ def _stamp(ax, text="PLACEHOLDER"):
             fontweight="bold")
 
 
-def fig1_workflow(path: str) -> None:
-    """Figure 1, overall workflow. Real content, not a placeholder."""
-    plt.rcParams.update({"font.family": "serif"})
-    fig, ax = plt.subplots(figsize=(10.6, 8.2))
-    ax.set_xlim(0, 100), ax.set_ylim(0, 78), ax.axis("off")
-
-    def box(x, y, w, h, t, fc, fs=8.0, bold=False):
-        ax.add_patch(mpatches.FancyBboxPatch(
-            (x, y), w, h, boxstyle="round,pad=0.4", lw=1.1,
-            edgecolor="#2c3e50", facecolor=fc))
-        ax.text(x + w / 2, y + h / 2, t, ha="center", va="center", fontsize=fs,
-                fontweight="bold" if bold else "normal")
-
-    def arr(x1, y1, x2, y2):
-        ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
-                    arrowprops=dict(arrowstyle="-|>", color="#2c3e50", lw=1.2))
-
-    def band(y, h, t):
-        ax.add_patch(mpatches.Rectangle((0.5, y), 99, h, facecolor="#fbfbfb",
-                                        edgecolor="#bdc3c7", lw=0.8, ls=":",
-                                        zorder=0))
-        ax.text(1.8, y + h - 1.5, t, fontsize=9, fontweight="bold", va="top",
-                color="#34495e")
-
-    C = dict(src="#dfe9f5", pre="#e4f1e4", enc="#fdf0d9", nov="#f6e0ea",
-             head="#e8e2f3", ev="#ededed")
-
-    band(60, 17.5, "Stage 1   Corpus harmonisation and leakage control")
-    for t, x in [("Depression\nEmo", 3.5), ("Dreaddit", 16), ("DepSeverity", 27),
-                 ("C-SSRS\nReddit", 38.5), ("IRF", 49.5), ("LoST", 58.5),
-                 ("IMHI", 67.5), ("Reddit MH pool\n1,107,302 posts", 77)]:
-        box(x, 69, 11 if x < 70 else 20, 6.5, t, C["src"], fs=7.0)
-    arr(50, 68.8, 50, 66.3)
-    box(9, 61, 82, 5,
-        "global post_id = MD5(norm(x)[:200])   \u2022   one split per post   "
-        "\u2022   author-disjoint   \u2022   strictest-split-wins", C["pre"], fs=7.6)
-
-    arr(27, 60.8, 27, 57.3)
-    arr(73, 60.8, 73, 57.3)
-    box(7, 51, 38, 6.3, "labelled.parquet   19,762 posts\n"
-        "22 symptoms  \u2022  severity  \u2022  risk  \u2022  stress", C["pre"], fs=7.4)
-    box(55, 51, 38, 6.3, "weak_pool.parquet   1,017,959 posts\n"
-        "Qwen2.5-7B labels 6,000 training posts", C["pre"], fs=7.4)
-
-    band(20.5, 29, "Stage 2   SymptoGraph-LLM estimation pipeline")
-    arr(26, 50.8, 26, 46.3)
-    box(4, 39.5, 20, 6.8, "MentalRoBERTa\nencoder, 192 tokens", C["enc"], fs=7.6)
-    arr(24.2, 42.9, 27.8, 42.9)
-    box(28, 38, 21, 9.8, "N1  Concept bottleneck\n22 definition-initialised\n"
-        "queries, per-symptom $w_k$\nconcept-gated pooling", C["nov"], fs=7.0)
-    arr(49.2, 42.9, 52.8, 42.9)
-    box(53, 38, 19, 9.8, "N2  Comorbidity graph\n$A=\\mathrm{relu}(A_0+\\Delta A)$\n"
-        "DSM-5 prior, $L_1$ residual", C["nov"], fs=7.0)
-    arr(72.2, 42.9, 75.8, 42.9)
-    box(76, 38, 21, 9.8, "N5  Profile contrastive\n"
-        "$\\pi_i=\\mathrm{MLP}(g_i)$\n"
-        "$J(y_i,y_j)\\geq 0.5$ positives", C["nov"], fs=7.0)
-
-    arr(74, 50.8, 74, 33.3)
-    box(28, 25.5, 21, 6.5, "N3  Weak-label stream\n6,000 posts, 11 symptoms",
-        C["nov"], fs=7.0)
-    box(53, 25.5, 19, 6.5, "N6  Learned uncertainty\n"
-        "$s_{ik}=u_k^{\\top}\\mathrm{sg}[g_i]$", C["nov"], fs=7.0)
-    arr(49.2, 28.8, 52.8, 28.8)
-    arr(38.5, 32.1, 38.5, 37.8)
-    arr(62.5, 32.1, 62.5, 37.8)
-    box(76, 24.5, 21, 7.5, "Prediction heads\n22 symptoms  \u2022  severity (4)\n"
-        "risk (5)  \u2022  stress (1)  \u2022  abstain", C["head"], fs=6.8)
-    arr(86.5, 37.8, 86.5, 32.3)
-
-    band(2, 16, "Stage 3   Leakage-controlled evaluation protocol")
-    for t, x, w in [("3 seeds", 4, 12), ("selection on\nvalidation loss", 18, 16),
-                    ("per-symptom thresholds\ntuned on validation", 36, 22),
-                    ("paired bootstrap\n1,000 resamples", 60, 17),
-                    ("per-task 95%\nintervals", 79, 16)]:
-        box(x, 9.5, w, 5.8, t, C["ev"], fs=7.0)
-    box(14, 3, 72, 5,
-        "3 baselines   \u2022   3 re-implemented comparison models   \u2022   "
-        "5 component-wise ablations", C["ev"], fs=7.6)
-    arr(50, 9.3, 50, 8.2)
-    fig.tight_layout()
-    fig.savefig(path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-
-
-def fig2_architecture(path: str) -> None:
-    """Figure 2, the architecture diagram with tensor shapes. Real content."""
-    plt.rcParams.update({"font.family": "serif"})
-    fig, ax = plt.subplots(figsize=(11.0, 8.2))
-    ax.set_xlim(0, 100), ax.set_ylim(0, 76), ax.axis("off")
-
-    def box(x, y, w, h, t, fc, fs=7.6, bold=False):
-        ax.add_patch(mpatches.FancyBboxPatch(
-            (x, y), w, h, boxstyle="round,pad=0.35", lw=1.1,
-            edgecolor="#2c3e50", facecolor=fc))
-        ax.text(x + w / 2, y + h / 2, t, ha="center", va="center", fontsize=fs,
-                fontweight="bold" if bold else "normal")
-
-    def arr(x1, y1, x2, y2, label=None, ls="-"):
-        ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
-                    arrowprops=dict(arrowstyle="-|>", color="#2c3e50", lw=1.1,
-                                    linestyle=ls))
-        if not label:
-            return
-        if abs(y2 - y1) < 0.5:
-            # horizontal: sit the label above the arrow so it cannot run into
-            # the box the arrow points at
-            ax.text((x1 + x2) / 2, y1 + 1.5, label, fontsize=6.6,
-                    color="#555", style="italic", ha="center", va="bottom")
-        else:
-            ax.text((x1 + x2) / 2 + 1.2, (y1 + y2) / 2, label, fontsize=6.6,
-                    color="#555", style="italic", ha="left", va="center")
-
-    C = dict(inp="#dfe9f5", enc="#fdf0d9", n1="#f6e0ea", n2="#e7f0da",
-             na="#f9e2cf", n3="#eae3f5", nb="#d9ecef", out="#e8e2f3",
-             loss="#f3f3f3")
-
-    box(2, 68, 24, 6, "Post text  $x_i$", C["inp"], fs=8.2, bold=True)
-    arr(14, 67.8, 14, 64.3, "tokenise, 192")
-    box(2, 57.5, 24, 6.5, "MentalRoBERTa encoder\n12 layers, $D=768$", C["enc"],
-        fs=7.8)
-    arr(14, 57.3, 14, 53.8, "$H_i\\in\\mathbb{R}^{192\\times 768}$")
-
-    ax.text(50, 51.5, "N1   Clinical concept bottleneck", fontsize=8.6,
-            fontweight="bold", ha="center", color="#8e2a52")
-    box(2, 43, 22, 6.5, "Symptom queries $q_k$\ninit = SBERT(def$_k$)\n$22\\times 768$",
-        C["n1"], fs=7.0)
-    arr(24.2, 46.3, 28.8, 46.3)
-    box(29, 43, 20, 6.5, "Symptom attention\n$\\alpha_{ik}=\\mathrm{softmax}_l"
-        "(H_{il}^{\\top}q_k/\\sqrt{D})$", C["n1"], fs=6.8)
-    arr(49.2, 46.3, 53.8, 46.3, "$Z_i\\in\\mathbb{R}^{22\\times 768}$")
-    box(54, 43, 20, 6.5, "Per-symptom scoring\n$c_{ik}=w_k^{\\top}Z_{ik}+b_k$\n"
-        "$w\\in\\mathbb{R}^{22\\times 768}$", C["n1"], fs=6.8)
-    arr(74.2, 46.3, 78.8, 46.3, "$c_i\\in\\mathbb{R}^{22}$")
-    box(79, 43, 19, 6.5, "Concept-gated pool\n$g_i=\\sum_k\\sigma(c_k)Z_k/"
-        "\\sum_k\\sigma(c_k)$", C["n1"], fs=6.6)
-
-    arr(64, 42.8, 64, 38.3)
-    box(40, 31.5, 48, 6.5, "N2   Comorbidity graph message passing\n"
-        "$\\tilde{A}=D^{-1/2}(\\mathrm{relu}(A_0+\\Delta A)+I)D^{-1/2}$,  "
-        "2 layers, LayerNorm", C["n2"], fs=7.0)
-    box(2, 31.5, 35, 6.5, "Graph prior $A_0$\nDSM-5 symptom$\\rightarrow$disorder\n"
-        "$p(b\\,|\\,a)$ disorder$\\leftrightarrow$disorder", C["n2"], fs=6.8)
-    arr(37.2, 34.8, 39.8, 34.8)
-    arr(64, 31.3, 64, 26.8, "refined $c_i$")
-
-    ax.text(25, 24.5, "N5   Symptom-profile contrastive", fontsize=8.4,
-            fontweight="bold", ha="center", color="#a0522d")
-    box(2, 15.5, 22, 7.5, "Projection head\n$\\pi_i=\\mathrm{MLP}(g_i)"
-        "\\in\\mathbb{R}^{128}$", C["na"], fs=6.9)
-    arr(24.2, 19.3, 28.8, 19.3)
-    box(29, 15.5, 25, 7.5, "InfoNCE over profile overlap\n"
-        "$\\mathcal{P}_i=\\{j: J(y_i,y_j)\\geq 0.5\\}$\n$T=0.1$",
-        C["na"], fs=6.7)
-
-    box(59, 15.5, 17, 7.5, "Symptom head\n$22$ logits", C["out"], fs=7.0)
-    box(78, 15.5, 20, 7.5, "Severity (4)  Risk (5)\nStress (1)\nclass-weighted CE",
-        C["out"], fs=6.8)
-    arr(79, 42.8, 79, 23.3)
-    arr(54.2, 19.3, 58.8, 19.3)
-    arr(76.2, 19.3, 77.8, 19.3)
-
-    ax.text(25, 12.6, "N3 weak supervision   |   N6 learned uncertainty",
-            fontsize=8.4, fontweight="bold", ha="center", color="#2c6e7f")
-    box(2, 4.5, 22, 6.5, "N3  Weak stream\n6,000 LLM-labelled posts\n"
-        "11 unannotated symptoms", C["n3"], fs=6.7)
-    arr(24.2, 7.8, 28.8, 7.8)
-    box(29, 4.5, 25, 6.5, "N6  Per-symptom log-variance\n"
-        "$s_{ik}=u_k^{\\top}\\mathrm{sg}[g_i]$,  abstention", C["nb"], fs=6.7)
-    arr(54.2, 7.8, 58.8, 7.8)
-    box(59, 4.5, 39, 6.5, "Total objective  "
-        "$\\mathcal{L}=\\mathcal{L}_{\\mathrm{sym}}+\\lambda_s\\mathcal{L}_{\\mathrm{sev}}"
-        "+\\lambda_r\\mathcal{L}_{\\mathrm{risk}}+\\lambda_t\\mathcal{L}_{\\mathrm{str}}"
-        "+\\lambda_c\\mathcal{L}_{\\mathrm{con}}+\\lambda_u\\mathcal{L}_{\\mathrm{unc}}"
-        "+\\lambda_g\\|\\Delta A\\|_1$", C["loss"], fs=6.3)
-    arr(67, 15.3, 67, 11.3, ls="--")
-    arr(88, 15.3, 88, 11.3, ls="--")
-    fig.tight_layout()
-    fig.savefig(path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
+def build_diagrams() -> dict[str, str]:
+    """Figures 1 and 2, drawn by ``diagrams.py``, which also writes the
+    editable .drawio sources into docs/diagrams so the figure in the paper and
+    the source a reader can open cannot diverge."""
+    return diagrams.build(FIGS, os.path.join(DOCS, "diagrams"),
+                          R.WEAK_ROWS_STR, f"{R.GOLD_TRAIN_ROWS:,}",
+                          R.PARAMS_M)
 
 
 def fig3a_loss(path: str) -> None:
@@ -496,17 +324,31 @@ def caption(doc, text):
 
 
 def equation(doc, eqs, n, width=None):
+    """Insert equation n as a native Word equation, numbered on the right.
+
+    ``eqs`` maps number -> LaTeX source. The equation is real OMML, so it is
+    editable in Word and reflows with the text; it is not an image.
+    """
+    latex = eqs[n]
+    xml = latex_to_omml(latex)
+    if not is_well_formed(xml):
+        raise ValueError(f"equation {n} produced malformed OMML")
+
+    # One paragraph holds the equation and its number, as in the reference.
+    # A centre tab at half the text width and a right tab at the full width
+    # give a centred equation with the number flush right.
     p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    img = eqs[n]
-    from PIL import Image as _I
-    w_px, _ = _I.open(img).size
-    w_in = min(5.6, max(1.6, w_px / 300.0))
-    p.add_run().add_picture(img, width=Inches(width or w_in))
-    q = doc.add_paragraph()
-    q.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = q.add_run(f"({n})")
-    _style(r)
+    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    stops = p.paragraph_format.tab_stops
+    stops.add_tab_stop(Inches(3.135), WD_TAB_ALIGNMENT.CENTER)
+    stops.add_tab_stop(Inches(6.27), WD_TAB_ALIGNMENT.RIGHT)
+
+    lead = p.add_run("\t")
+    _style(lead)
+    p._p.append(parse_xml(f"{xml[:len('<m:oMath')]} {nsdecls('m', 'w')}"
+                          f"{xml[len('<m:oMath'):]}"))
+    trail = p.add_run(f"\t({n})")
+    _style(trail)
 
 
 def figure(doc, images, number, text, width=6.27):
@@ -554,9 +396,11 @@ def load_references() -> list[str]:
     return [f"[{n}] {b}" for n, b in refs]
 
 
-TITLE = ("SymptoGraph-LLM: a symptom-grounded, comorbidity-aware multi-task "
-         "network for interpretable mental health assessment from social media "
-         "text under calibrated weak supervision")
+# Shortened from a 20-word title. "LLM" is retained because an instruction-tuned
+# model supplies the weak supervision, but the title no longer calls that
+# supervision calibrated, which the measurements in Section 5.3 do not support.
+TITLE = ("SymptoGraph-LLM: symptom-grounded, comorbidity-aware mental health "
+         "assessment with selective prediction")
 
 
 def build_document(eqs, figs) -> None:
@@ -639,7 +483,7 @@ def build_document(eqs, figs) -> None:
         "step.")
     para(doc,
         "While previous research has applied deep models to mental health text, "
-        "none has done so as this paper does. Xu et al. [1] evaluate large "
+        "the following five works are the closest in intent. Xu et al. [1] evaluate large "
         "language models for mental health prediction from online text across "
         "zero-shot, few-shot and instruction-tuned regimes, establishing that "
         "instruction tuning recovers much of the gap to supervised encoders but "
@@ -700,12 +544,12 @@ def build_document(eqs, figs) -> None:
 
     label(doc, "Novelty")
     para(doc,
-        "This paper stands out in the sense that it integrates five ideas that "
+        "This paper integrates five ideas that "
         "have not been combined before in mental health assessment from social "
         "media text. First, the clinical concept bottleneck is obligatory and "
         "its symptom queries are initialised from the sentence embeddings of "
         "the clinical definitions themselves, each symptom carrying "
-        "an independent scoring vector. Second, comorbidity enters as a graph "
+        "an independent scoring vector. The five are numbered N1, N2, N3, N5 and N6 throughout, the gap at N4 marking a symptom-grounded rationale generator that was specified but not implemented and is therefore absent from every result in this paper. Second, comorbidity enters as a graph "
         "whose nodes are symptoms and disorders and whose adjacency is a DSM-5 "
         "prior corrected by a learned residual under a sparsity penalty, with "
         "disorder-disorder edges estimated as conditional co-membership "
@@ -947,8 +791,8 @@ def build_document(eqs, figs) -> None:
          "Systematic review of large language models in care delivery",
          "Concludes that clinical integration rather than model scale limits "
          "present utility",
-         "Calls for leakage-controlled and significance-audited primary studies "
-         "without conducting one"],
+         "Identifies the need for leakage-controlled and significance-audited "
+         "primary studies"],
         ["Proposed", "Multi-task mental health assessment",
          "Symptom-grounded concept bottleneck over a comorbidity graph, with "
          "profile-contrastive representation shaping and a learned-variance "
@@ -1008,8 +852,8 @@ def build_document(eqs, figs) -> None:
         "reduce its loss by suppressing accuracy, and the resulting score "
         "orders cases by reliability and supports abstention. The evaluation "
         "protocol applies per-symptom decision thresholds tuned on validation "
-        "data, three-seed replication and paired bootstrap tests, against three "
-        "retrained comparison models and a six-rung ablation ladder. "
+        "data and three-seed replication, against three retrained reference "
+        "models and a six-rung ablation ladder. "
         "The full pipeline of the proposed SymptoGraph-LLM framework is "
         "illustrated in Figure 1.")
     figure(doc, figs["fig1"], 1,
@@ -1051,10 +895,15 @@ def build_document(eqs, figs) -> None:
         "in Dreaddit, so that treating either as an independent evaluation set "
         "for the other would be circular; LoST and the Interpersonal Risk "
         "Factors collection share 3,089 posts; the IMHI collection repackages "
-        "posts from other sources behind an instruction prefix; 192,893 of the "
-        "822,884 authors appear in more than one source file, representing 23.3 "
-        "per cent of the author population; and the unlabelled pool contains "
-        "85,659 internal duplicates. A global post identifier computed as a hash "
+        "posts from other sources behind an instruction prefix; and the "
+        "unlabelled pool contains 85,659 internal duplicates. The author "
+        "audit applies to the unlabelled pool, where 192,893 of 822,884 "
+        "distinct authors appear in more than one source file. It does not "
+        "extend to the labelled corpus, which carries usable author "
+        "identifiers for only 500 authors, so author-disjointness is verified "
+        "on the pool but is unverifiable on most gold-labelled rows, a "
+        "limitation recorded in Section 5.3. A global post identifier "
+        "computed as a hash "
         "over a normalised two-hundred-character prefix therefore collapses each "
         "unique post to one row, every unique post receives exactly one split "
         "assignment, Reddit posts carrying a known author are partitioned "
@@ -1098,12 +947,12 @@ def build_document(eqs, figs) -> None:
         "per-symptom decision thresholds and triggering early stopping. The "
         "composition of the annotated subsets across the four prediction tasks "
         "is reported in Table 3.")
-    caption(doc, "Table 3. Task composition of the training and test subsets")
+    caption(doc, "Table 3. Task composition of the training and test subsets. Test share is the test count as a proportion of the labelled instances for that task.")
     table(doc, [
         ["Prediction task", "Training instances", "Test instances",
          "Test share"],
         ["Symptom presence (22 labels)", "6,227", "1,956", "23.9%"],
-        ["Perceived stress (binary)", "2,478", "706", "22.2%"],
+        ["Perceived stress (binary)", "2,456", "541", "18.1%"],
         ["Depression severity (4 levels)", "2,456", "541", "18.1%"],
         ["Suicide risk (5 levels)", "340", "74", "17.9%"],
         ["Weak-labelled symptoms (11 labels)", R.WEAK_ROWS_STR, "\u2013",
@@ -1123,9 +972,10 @@ def build_document(eqs, figs) -> None:
         "capped inverse-frequency class weights are applied to both ordinal "
         "objectives and capped positive weights are applied to the symptom "
         "objective. The consequence of the risk partition size for the "
-        "interpretation of risk metrics is quantified explicitly in Section 4.3, "
-        "where the confidence interval attainable on 74 test instances is shown "
-        "to exceed any architectural difference observed in this study.")
+        "interpretation of risk metrics is addressed in Section 4.3 and "
+        "Section 5.3: on 74 test instances across five levels the seed "
+        "dispersion alone reaches 0.136, which exceeds every architectural "
+        "difference observed in this study.")
     para(doc,
         "Each post also carries the conditioning information used by the "
         "framework. The symptom definitions, taken verbatim from the PHQ-9 and "
@@ -1219,7 +1069,19 @@ def build_document(eqs, figs) -> None:
         "those eleven at every row of every partition. Those eleven are "
         "predominantly the anxiety-spectrum concepts drawn from the GAD-7 "
         "instrument, for which no constituent collection provides item-level "
-        "annotation.")
+        "annotation. Three properties of the eleven that remain bound every "
+        "symptom number in this paper and are stated here rather than in a "
+        "footnote. Only five of the sixteen PHQ-9 and GAD-7 items are among "
+        "them, the other six being constructs drawn from the "
+        "interpersonal-risk and loneliness literature, so the symptom metrics "
+        "do not constitute instrument-level coverage. Eight of the eleven "
+        "take their annotation from a single corpus, DepressionEmo, whose "
+        "emotion labels are mapped onto PHQ-9 items by a documented "
+        "heuristic correspondence rather than by clinical item-level "
+        "annotation. And their positive prevalence is high, 77.3 per cent for "
+        "depressed mood and 69.5 per cent for hopelessness, so a "
+        "threshold-tuned positive-class F1 on this label space is a less "
+        "demanding quantity than the same number computed on a balanced set.")
     equation(doc, eqs, 3)
     para(doc,
         "where the bucketing function maps a salted hash of the author "
@@ -1235,9 +1097,13 @@ def build_document(eqs, figs) -> None:
         "every author found to span a boundary to the single partition holding "
         "the majority of that author's posts before the verification assertion "
         "is evaluated. Measured over the harmonised corpus, this procedure "
-        "relocates the posts of the 192,893 authors appearing in more than one "
-        "source file and reduces the number of authors spanning a split to "
-        "zero. An alternative design in which each constituent corpus is "
+        "would relocate any author found to span a boundary. In the run reported "
+        "here the pass applied zero overrides, because 13,386 of the 19,762 "
+        "posts take the split published by their source corpus and only the "
+        "remainder are assigned by author hashing, so the repair had nothing "
+        "to move; the verification assertion that no author spans a split "
+        "therefore passes over the 500 authors it can see rather than over the "
+        "whole corpus. An alternative design in which each constituent corpus is "
         "partitioned independently according to its own published split was "
         "considered and rejected, because the overlap measurements above show "
         "that such a procedure would place the same post in the training "
@@ -1264,7 +1130,7 @@ def build_document(eqs, figs) -> None:
     equation(doc, eqs, 5)
     para(doc,
         "where the stratified sampler draws from the unlabelled pool "
-        "proportionally across the disorder categories and the posting periods, "
+        "evenly across the disorder categories and the posting periods, "
         "and the control share caps the proportion of posts originating from "
         "non-clinical subreddits at fifteen per cent of the subsample. The "
         f"resulting subsample of {R.WEAK_ROWS_STR} posts is the material "
@@ -1272,7 +1138,7 @@ def build_document(eqs, figs) -> None:
         "weak-supervision branch described in Section 3.5, and its size was "
         "chosen as the largest quantity that could be labelled by a locally "
         "executed instruction-tuned model within the available compute budget, "
-        "measured at approximately 1.6 posts per second. The remainder of the "
+        "measured at approximately 8 posts per second. The remainder of the "
         "pool is retained unlabelled. It should be emphasised that the "
         "subsample is drawn exclusively from posts assigned to the training "
         "partition by the preceding operations, so that weak supervision cannot "
@@ -1315,8 +1181,8 @@ def build_document(eqs, figs) -> None:
         "where the attention distribution for symptom k is computed over token "
         "positions with the query for that symptom, and the query is initialised "
         "from the sentence embedding of the clinical definition of the symptom "
-        "rather than from a random draw. This initialisation is load-bearing "
-        "rather than cosmetic: it establishes the association between a query "
+        "rather than from a random draw. This initialisation is consequential "
+        "consequential: it establishes the association between a query "
         "and its symptom before any gradient is applied, which matters because "
         "eleven of the twenty-two symptoms receive no gold supervision at all "
         "and would otherwise have no signal by which to acquire a clinical "
@@ -1334,7 +1200,18 @@ def build_document(eqs, figs) -> None:
         "representation space, which collapses the symptom layer to an "
         "effectively scalar quantity and removes the per-symptom "
         "addressability the design exists to provide. The defect is invisible "
-        "in the aggregate loss.")
+        "in the aggregate loss. One qualification on the word bottleneck is "
+        "owed to the reader at this point. The prediction heads receive the "
+        "concatenation of the twenty-two concept logits with the "
+        "768-dimensional concept-gated pooled vector, as Table 4 records, so "
+        "information reaches them that is not carried by the concept logits "
+        "alone. The symptom layer is therefore obligatory in the sense that "
+        "the pooled vector is itself gated by the concept activations, and "
+        "not in the stronger sense that the heads observe nothing but "
+        "twenty-two numbers. No concept-intervention or faithfulness test is "
+        "reported, so the interpretability of the layer is a property of the "
+        "architecture as described and is not experimentally established; "
+        "Section 5.3 records this.")
     equation(doc, eqs, 9)
     para(doc,
         "where the gate is the activation of each concept and the pooled "
@@ -1393,10 +1270,14 @@ def build_document(eqs, figs) -> None:
         "conditions per author in this corpus is 1.125, which bounds the "
         "attainable lift below unity and causes a pointwise mutual information "
         "matrix to vanish identically. The estimated edges are clinically "
-        "plausible, the strongest associations holding between bipolar disorder "
-        "and schizophrenia at 0.676, between borderline personality disorder "
-        "and eating disorders at 0.428, and between attention-deficit "
-        "hyperactivity disorder and autism at 0.404. Two numerical safeguards "
+        "plausible in their ordering, the strongest co-membership enrichments "
+        "holding between bipolar disorder and schizophrenia, between "
+        "borderline personality disorder and eating disorders, and between "
+        "attention-deficit hyperactivity disorder and autism. Two caveats on "
+        "this block are recorded in Section 5.3: only 31 of the 231 symptom "
+        "pairs are observable in the annotation at all, and the prior was "
+        "authored by the present authors from diagnostic criteria without "
+        "clinician review. Two numerical safeguards "
         "are applied in the propagation step. Non-negativity is enforced on the "
         "summed adjacency before symmetric normalisation, because an "
         "unconstrained residual can drive a node degree towards zero and the "
@@ -1436,8 +1317,8 @@ def build_document(eqs, figs) -> None:
         ["Encoder blocks 1-12", "self-attention 12 heads, FFN 3072, GELU",
          "(B, 192, 768)"],
         ["Symptom queries", "22 queries initialised from SBERT definitions",
-         "(22, 768)"],
-        ["Definition projection", "linear 768 to 768 over query embeddings",
+         "(22, 384)"],
+        ["Definition projection", "linear 384 to 768 over query embeddings",
          "(22, 768)"],
         ["Symptom attention", "scaled dot-product over token positions, masked",
          "(B, 192, 22)"],
@@ -1509,8 +1390,8 @@ def build_document(eqs, figs) -> None:
     table(doc, [
         ["Component", "Parameters"],
         ["MentalRoBERTa encoder", "124,645,632"],
-        ["Symptom queries (22 x 768)", "16,896"],
-        ["Definition projection", "590,592"],
+        ["Symptom queries (22 x 384)", "8,448"],
+        ["Definition projection (384 to 768)", "295,680"],
         ["Per-symptom scoring vectors and biases", "16,918"],
         ["Graph node embeddings and residual adjacency",
          f"{22 * R.GRAPH_DIM:,} + {R.GRAPH_DIM}D + (22+D)\u00b2"],
@@ -1636,8 +1517,7 @@ def build_document(eqs, figs) -> None:
         "learning rates of two times ten to the power minus five for the "
         "pretrained encoder and one times ten to the power minus three for the "
         "randomly initialised heads, because a single rate either fails to move "
-        "the heads or destabilises the encoder. A linear schedule with ten per "
-        "cent warmup is applied over the full step budget, gradients are "
+        "the heads or destabilises the encoder. Gradients are "
         "clipped at unit norm, and mixed-precision arithmetic is used with "
         f"bfloat16 where the accelerator supports it, and a {R.SCHEDULER} "
         f"schedule with ten per cent warmup is applied over the full step "
@@ -1655,7 +1535,7 @@ def build_document(eqs, figs) -> None:
     table(doc, [
         ["Hyperparameter", "Value / configuration"],
         ["Framework", "PyTorch with HuggingFace Transformers"],
-        ["Dataset", "harmonised eight-corpus union, 19,762 posts"],
+        ["Dataset", "harmonised seven-corpus union, 19,762 posts"],
         ["Training paradigm",
          "multi-task supervised with weak-supervision stream"],
         ["Accelerator", "single NVIDIA L4, 24 GB, high-RAM runtime"],
@@ -1698,16 +1578,15 @@ def build_document(eqs, figs) -> None:
          "stopped-gradient pooled features, clamp [-6, 6]"],
         ["Task weights", "symptoms 1.0, severity 1.0, risk 1.0, stress 0.5"],
         ["Seeds", "0, 1, 2"],
-        ["Significance test", "paired bootstrap, two-sided"],
-        ["Bootstrap resamples", "1,000, paired on test examples"],
+        ["Replication", "3 seeds; dispersion reported as 1 standard deviation"],
+        ["Significance testing", "not performed, see Section 5.3"],
         ["Reported split", "held-out test, read once per run"],
     ], widths=[2.6, 2.7], fs=10)
     para(doc,
         f"The selected setup provides trade-offs between symptom-detection "
         f"fidelity, ordinal agreement, resistance to memorisation on the small "
         f"annotated partitions and computational cost. Two settings in Table 6 "
-        f"warrant comment because they were chosen against the grain of the "
-        f"measurements. The epoch budget of {R.EPOCH_BUDGET} is larger than "
+        f"warrant comment because the measurements do not straightforwardly support them. The epoch budget of {R.EPOCH_BUDGET} is larger than "
         f"the validation loss alone would justify, that quantity reaching its "
         f"minimum of {R.VAL_LOSS_MIN} at epoch {R.VAL_LOSS_MIN_EPOCH} and "
         f"rising thereafter, and is retained because the symptom and stress "
@@ -1730,13 +1609,24 @@ def build_document(eqs, figs) -> None:
         "across three random seeds so that a variance estimate accompanies each "
         "reported quantity. The framework and all competing conditions share "
         "one configuration object, so that the only quantity varying between "
-        f"conditions is the representation under test: identical "
-        f"leakage-controlled partitions, identical masked multi-task objective, "
-        f"identical capped symptom positive weights, identical capped ordinal "
-        f"class weights, identical per-symptom decision thresholds tuned on "
-        f"validation data, identical checkpoint selection rule, identical epoch "
-        f"budget and early-stopping patience, and identical seeds. Three "
-        f"comparison models were retrained from scratch under this protocol: a "
+        f"conditions is the representation under test. The six rungs of the "
+        f"ablation ladder in Section 4.5 share one configuration object "
+        f"exactly: the same leakage-controlled partitions, masked multi-task "
+        f"objective, capped symptom positive weights, capped ordinal class "
+        f"weights, per-symptom decision thresholds tuned on validation data, "
+        f"checkpoint selection rule, epoch budget, early-stopping patience and "
+        f"seeds. The three reference models of Section 4.6 do **not** share "
+        f"that configuration, and this must be stated rather than glossed: "
+        f"they were trained for 8 epochs at batch size 16 and a maximum length "
+        f"of 256 tokens without early stopping, against "
+        f"{R.EPOCH_BUDGET} epochs at batch size 32 and 192 tokens with "
+        f"patience {R.PATIENCE} for the proposed framework. The partitions, "
+        f"label space, metrics and seeds are shared, but the optimisation "
+        f"budget is not, so Section 4.6 is a comparison against reasonable "
+        f"reference configurations and not a controlled experiment; its "
+        f"margins cannot be attributed to architecture, and the conclusions "
+        f"this paper draws about architecture rest on the ladder in "
+        f"Section 4.5 instead. Three reference models were retrained: a "
         f"term-frequency representation with a multilayer perceptron, "
         f"representing the classical lexical approach; a bidirectional "
         f"recurrent encoder with attention, representing the pre-transformer "
@@ -1745,14 +1635,12 @@ def build_document(eqs, figs) -> None:
         f"standard for this family of tasks and is the strongest of the three "
         f"on every metric reported in Section 4.6. One point must be stated "
         f"plainly rather than left to inference. These three are reference "
-        f"models retrained under matched conditions, not reimplementations of "
-        f"specific published systems, so the comparison establishes that the "
-        f"proposed architecture outperforms the standard approach on this "
-        f"corpus under one protocol, and does not establish a ranking against "
-        f"any particular method in the literature; the figures here are "
-        f"consequently not comparable with those reported in the surveyed "
-        f"papers, whose evaluations use different corpora, label spaces and "
-        f"splits. A six-rung ablation ladder completes the design, adding "
+        f"models, not reimplementations of specific published systems, so the "
+        f"comparison does not establish a ranking against any named method in "
+        f"the literature; the figures here are not comparable with those "
+        f"reported in the surveyed papers, whose evaluations use different "
+        f"corpora, label spaces and splits. A six-rung ablation ladder "
+        f"carries the architectural argument, adding "
         f"exactly one component at each step from a flat encoder through to the "
         f"complete framework while the protocol is held fixed, so that the "
         f"contribution of each novelty is isolated against the same "
@@ -1765,9 +1653,19 @@ def build_document(eqs, figs) -> None:
         "fidelity, ordinal agreement, calibration under class imbalance and the "
         "statistical reliability of every reported difference. Because the four "
         "prediction tasks differ in size by more than an order of magnitude, no "
-        "single aggregate is reported as the headline quantity; instead each "
-        "task is reported separately with a confidence interval, and every "
-        "comparison between two conditions is accompanied by a paired test.")
+        "single aggregate is reported as the headline quantity; each task is "
+        "reported separately. Three conventions apply throughout and are "
+        "stated here because they are easy to misread. Every value of the "
+        "form a plus or minus b is the mean and the sample standard deviation "
+        "over the three seeds, not a confidence interval and not a standard "
+        "error. The quantity named Composite is the unweighted mean of three "
+        "metrics only, namely symptom macro-F1, depression-severity kappa and "
+        "suicide-risk kappa; it excludes the stress task, and because one of "
+        "its three terms is the risk kappa measured on 74 instances it is the "
+        "noisiest column in every table. The separate quantity used for "
+        "checkpoint selection is the unweighted mean of symptom macro-F1, "
+        "symptom macro-AUROC and depression-severity kappa, which excludes "
+        "both risk and stress; it is never reported as a result.")
     equation(doc, eqs, 16)
     para(doc,
         "where the macro average is taken over the symptoms carrying gold "
@@ -1822,15 +1720,19 @@ def build_document(eqs, figs) -> None:
         f"the table headings.")
     equation(doc, eqs, 20)
     para(doc,
-        "where the bootstrap resamples test examples with replacement, the same "
-        "resampled indices are applied to both conditions so that the "
+        "where the resampling would be paired on test examples so that the "
         "comparison observes differences in prediction rather than differences "
-        "in which examples were drawn, and the two-sided probability is the "
-        "proportion of resamples in which the sign of the "
-        "difference reverses. A difference is reported as established only if "
-        "it attains significance on every seed and preserves its sign on every "
-        "seed, and the multiple-comparison burden is stated explicitly wherever "
-        "several metrics are tested together.")
+        "in which examples were drawn. This test is defined here because it is "
+        "the test these comparisons require, and it is **not** reported in "
+        "this paper: the per-example predictions of the ablation rungs and the "
+        "reference models were not retained, so no paired test can be "
+        "computed after the fact. What is reported instead is the mean and "
+        "standard deviation over three seeds, which bounds nothing and "
+        "supports no claim of significance. Every comparison in Section 4 is "
+        "therefore descriptive, and differences of the size separating "
+        "adjacent ladder rungs are within the seed dispersion of the metrics "
+        "concerned. Section 5.3 states what this costs the paper and "
+        "Section 5.2 records the re-run that would supply it.")
 
     heading(doc, "4.3 Performance Analysis of the Proposed SymptoGraph-LLM")
     para(doc,
@@ -1896,14 +1798,10 @@ def build_document(eqs, figs) -> None:
          R.abl("L0_flat", "symptom_macro_f1[all]")],
         ["Symptom macro-AUROC", R.abl("L5_full", "symptom_macro_auroc[all]"),
          R.abl("L0_flat", "symptom_macro_auroc[all]")],
-        ["Symptom macro-F1, gold-supervised subset",
-         R.abl("L5_full", "symptom_macro_f1[gold_supervised]"),
-         R.abl("L0_flat", "symptom_macro_f1[gold_supervised]")],
-        ["Symptom macro-AUROC, gold-supervised subset",
-         R.abl("L5_full", "symptom_macro_auroc[gold_supervised]"),
-         R.abl("L0_flat", "symptom_macro_auroc[gold_supervised]")],
-        ["Symptom macro-AUROC, weak-only subset", "not measurable",
-         "not measurable"],
+        ["Symptom macro-F1, weak-only subset (11 symptoms)",
+         "not measurable", "not measurable"],
+        ["Symptom macro-AUROC, weak-only subset (11 symptoms)",
+         "not measurable", "not measurable"],
         ["Stress F1", R.abl("L5_full", "stress_f1"),
          R.abl("L0_flat", "stress_f1")],
         ["Stress AUROC", R.abl("L5_full", "stress_auroc"),
@@ -1983,10 +1881,10 @@ def build_document(eqs, figs) -> None:
         f"latter being a metric where lower is better. Suicide risk is "
         f"evaluated "
         "on 74 test instances across five levels, and the consequence of that "
-        "partition size is quantified in Section 4.6, where the attainable "
-        "confidence interval is shown to exceed every architectural difference "
-        "observed in this study, so that differences on the risk task are not "
-        "interpretable as architectural effects.")
+        "partition size is that the seed dispersion on that task alone reaches "
+        "0.136, which exceeds every architectural difference observed in this "
+        "study, so differences on the risk task are not interpretable as "
+        "architectural effects.")
 
     heading(doc, "4.4 Training Convergence Analysis")
     figure(doc, [figs["fig3a"], figs["fig3b"]], 3,
@@ -2097,10 +1995,13 @@ def build_document(eqs, figs) -> None:
         f"established by the three-seed replication rather than against zero, "
         f"and read that way it supports a narrower set of conclusions than the "
         f"leading row alone would suggest. The complete framework at L5 records "
-        f"the best value on {R.rungs_led_by_l5()[0]} of the "
-        f"{R.rungs_led_by_l5()[1]} reported metrics, including every symptom, "
-        f"severity and stress measure, but the ladder is not monotone and two "
-        f"rungs are led by earlier configurations. The concept bottleneck at L1 "
+        f"the best value on {R.rungs_led_by_l5()[0] + R.rungs_led_by_l5()[2]} "
+        f"of the {R.rungs_led_by_l5()[1]} metrics in that table, of which "
+        f"{R.rungs_led_by_l5()[0]} are outright and "
+        f"{R.rungs_led_by_l5()[2]} is a tie with an earlier rung, and it does "
+        f"not lead on "
+        f"{', '.join(R.rungs_led_by_l5()[3]) or 'any metric'}. The ladder is "
+        f"not monotone. The concept bottleneck at L1 "
         f"raises symptom macro-F1 from {R.m3('L0_flat', 'symptom_macro_f1[all]')} "
         f"to {R.m3('L1_bottleneck', 'symptom_macro_f1[all]')} and symptom "
         f"macro-AUROC from {R.m3('L0_flat', 'symptom_macro_auroc[all]')} to "
@@ -2277,7 +2178,7 @@ def build_document(eqs, figs) -> None:
     heading(doc, "5. Conclusion and Future Work")
     heading(doc, "5.1 Conclusion")
     para(doc,
-        "In this paper, we present SymptoGraph-LLM, a symptom-grounded and "
+        "This paper has presented SymptoGraph-LLM, a symptom-grounded and "
         "comorbidity-aware multi-task network that addresses the problem of "
         "producing mental health assessments from social media text which a "
         "clinician can inspect and act upon. The framework replaces direct "
@@ -2332,6 +2233,116 @@ def build_document(eqs, figs) -> None:
     bullet(doc,
         "Submitting the symptom-disorder prior for clinician review with a "
         "random-graph control, and enlarging the suicide-risk annotation.")
+    bullet(doc,
+        "Retaining per-example predictions so that paired significance tests "
+        "and per-metric confidence intervals can be computed, and retraining "
+        "the reference models under the proposed model's optimisation budget "
+        "so that Section 4.6 becomes a controlled comparison.")
+
+    heading(doc, "5.3 Limitations")
+    para(doc,
+        f"The limitations below are not residual caveats but the conditions "
+        f"under which the numbers in Section 4 should be read, and several of "
+        f"them bound the conclusions more tightly than the results do. "
+        f"**Statistical support.** No significance test and no confidence "
+        f"interval is reported anywhere in this paper. Each configuration was "
+        f"run on three seeds and the dispersion is reported as a standard "
+        f"deviation; with three samples this supports no inference, and the "
+        f"per-example predictions needed for a paired test were not retained. "
+        f"Differences of the size separating adjacent ladder rungs, including "
+        f"the {R.margin('symptom_macro_f1[all]', 'L5_full', 'L0_flat')} "
+        f"symptom macro-F1 between the flat encoder and the complete "
+        f"framework, are comparable to the seed dispersion of the metrics "
+        f"concerned. No architectural effect in this study is established in "
+        f"the statistical sense, and the ladder should be read as a "
+        f"description of six configurations rather than as a demonstration "
+        f"that any component works. "
+        f"**The reference comparison is not controlled.** As Section 4.1 "
+        f"states, the three reference models were trained for 8 epochs at "
+        f"batch 16 and length 256 without early stopping, against "
+        f"{R.EPOCH_BUDGET} epochs at batch 32 and length 192 for the proposed "
+        f"framework. The margins in Table 10 therefore confound architecture "
+        f"with optimisation budget. A related asymmetry is that the reference "
+        f"models never see the weak-labelled posts, and the flat rung L0 and "
+        f"the fine-tuned MentalRoBERTa reference share an encoder yet differ "
+        f"by {R.margin('symptom_macro_f1[all]', 'L0_flat', 'mentalroberta')} "
+        f"symptom macro-F1, a gap this paper cannot explain and which is "
+        f"itself evidence that the two protocols are not interchangeable. "
+        f"**Checkpoint selection.** The reported checkpoints were chosen by a "
+        f"composite validation score and fall at epochs {R.BEST_EPOCHS}, past "
+        f"the validation-loss minimum, with training risk agreement at "
+        f"{R.TRAIN_RISK_QWK_LAST}. The two graded heads are reported below "
+        f"their attainable values as a result.")
+    para(doc,
+        f"**Evaluation covers half the ontology.** Every symptom number is "
+        f"computed on the eleven gold-annotated concepts; the eleven the "
+        f"weak-supervision branch exists to supervise are never scored, so "
+        f"that branch cannot be credited by any measurement here and is "
+        f"measured only through its effect on the other half, where that "
+        f"effect is negative. Only five of the sixteen PHQ-9 and GAD-7 items "
+        f"are scored at all, eight of the eleven derive from one corpus, and "
+        f"their mapping from emotion labels onto instrument items is "
+        f"heuristic. No per-symptom table, trivial-baseline comparison or "
+        f"keyword-masked control is reported. "
+        f"**Leakage control is partial.** The author-disjointness guarantee "
+        f"is verified on the unlabelled pool but rests on 500 usable author "
+        f"identifiers in the labelled corpus, and 13,386 of the 19,762 posts "
+        f"take the split published by their source corpus rather than an "
+        f"author bucket. Deduplication uses an exact hash of a 200-character "
+        f"normalised prefix, which merges nothing that differs later in the "
+        f"text and nothing that is a near-duplicate. The disorder labels "
+        f"feeding the graph are subreddit-membership proxies, not diagnoses. "
+        f"**Interpretability and the graph are described, not tested.** No "
+        f"concept-intervention, faithfulness or clinician evaluation is "
+        f"reported; the prediction heads additionally observe the pooled "
+        f"vector alongside the concept logits. The symptom-disorder prior was "
+        f"authored by the present authors without clinician review, only 31 "
+        f"of 231 symptom pairs are observable, the disorder nodes carry no "
+        f"supervision and no output, and no random-graph control was run, "
+        f"which is the same omission this paper criticises in the surveyed "
+        f"literature. "
+        f"**Weak supervision is not calibrated.** Temperature scaling moved "
+        f"the labeller's expected calibration error from 0.224 to 0.183 and "
+        f"the resulting reliability curve is not monotone, so the word "
+        f"calibrated is not claimed for it; labeller agreement with gold "
+        f"averages 0.66 F1 and 0.41 kappa, falling to 0.12 kappa on low "
+        f"self-esteem. Of the 49,982 posts labelled, 6,000 were used, and the "
+        f"subsample was drawn without a documented selection rule beyond "
+        f"stratification. "
+        f"**No external validation.** All results come from one harmonised "
+        f"corpus with a single split. No out-of-domain test, no subgroup "
+        f"analysis by period or community, and no clinical validation of any "
+        f"kind was performed, and the labels throughout are social-media "
+        f"proxies rather than diagnoses.")
+
+    heading(doc, "5.4 Ethical Considerations and Availability")
+    para(doc,
+        "This study uses only publicly available, previously published "
+        "collections of social media text, obtained under the licences their "
+        "authors attach and used within the terms of those licences; no new "
+        "data were collected from human participants and no institutional "
+        "review was therefore sought, which is itself a limitation for work "
+        "on clinical text. Author identifiers are pseudonymous handles and "
+        "are used solely to keep a writer's posts on one side of a split; no "
+        "attempt was made to deanonymise any author, no author-level profile "
+        "is published, and the weak-labelling model was executed locally "
+        "rather than through a hosted interface precisely so that no post "
+        "left the processing environment, as several of the constituent data "
+        "agreements require. The intended use of this work is methodological. "
+        "It is not a screening instrument and must not be deployed as one. "
+        "The suicide-risk head in particular is trained on 340 instances and "
+        "evaluated on 74, it does not lead the comparison on that task, and "
+        "its seed dispersion exceeds every difference this study can resolve; "
+        "a false negative from such a component is a missed crisis, and the "
+        "abstention mechanism of Section 4.6 is offered as a means of "
+        "referring uncertain cases to a clinician rather than as a licence to "
+        "automate the decision. Any application to real users would require "
+        "clinician oversight, prospective validation, and subgroup auditing "
+        "that this paper does not provide. The source for the pipeline, the "
+        "model, the ablation ladder and the manuscript, together with the "
+        "run outputs from which every number in Section 4 is read, are "
+        "available in the project repository; the constituent corpora must be "
+        "obtained from their original authors under their original terms.")
 
     # ------------------------------------------------------------- references
     heading(doc, "6. References")
@@ -2345,7 +2356,7 @@ def build_document(eqs, figs) -> None:
 
 def write_results_index() -> None:
     """Record where every number in the manuscript came from."""
-    led, total = R.rungs_led_by_l5()
+    led, total, ties, lost_rungs = R.rungs_led_by_l5()
     bled, btotal, blost = R.beats_all_baselines()
     path = os.path.join(DOCS, "RESULTS_PROVENANCE.md")
     open(path, "w", encoding="utf-8").write(f"""# Results provenance
@@ -2390,7 +2401,8 @@ notebook PNGs, which plot validation and would contradict the tables.
 
 ## Headline findings
 
-- L5 leads {led} of {total} ablation metrics; the ladder is **not** monotone.
+- Table 9: L5 wins {led} of {total} outright, ties {ties}, and does not lead
+  on {", ".join(lost_rungs) or "nothing"}. The ladder is **not** monotone.
 - L5 beats every comparison model on {bled} of {btotal} metrics, losing on
   {", ".join(blost) if blost else "nothing"}.
 - Selective prediction: AURC {R.sel("aurc")}, symptom error
@@ -2436,8 +2448,7 @@ notebook PNGs, which plot validation and would contradict the tables.
 
 def main() -> None:
     os.makedirs(FIGS, exist_ok=True)
-    eqs = render_equations()
-    print(f"rendered {len(eqs)} equations -> {EQS}")
+    eqs = check_equations()
     figs = {
         "fig1": os.path.join(FIGS, "figure1_workflow.png"),
         "fig2": os.path.join(FIGS, "figure2_architecture.png"),
@@ -2447,8 +2458,7 @@ def main() -> None:
         "fig5a": os.path.join(FIGS, "figure5a_sota.png"),
         "fig5b": os.path.join(FIGS, "figure5b_ci.png"),
     }
-    fig1_workflow(figs["fig1"])
-    fig2_architecture(figs["fig2"])
+    figs.update(build_diagrams())
     fig3a_loss(figs["fig3a"])
     fig3b_qwk(figs["fig3b"])
     fig4_ablation(figs["fig4"])
