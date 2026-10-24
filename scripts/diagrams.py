@@ -384,7 +384,7 @@ def workflow(weak_rows: str, gold_train: str) -> Diagram:
 # Figure 2: the architecture, as extruded stages inside novelty regions
 # --------------------------------------------------------------------------- #
 def architecture(weak_rows: str, params_m: str) -> Diagram:
-    d = Diagram("SymptoGraph-LLM architecture", 1180, 836)
+    d = Diagram("SymptoGraph-LLM architecture", 1270, 900)
     BW, BH = 168, 66
 
     def row(y, items, colour, region_label, x0=38, gap=26, kinds=None,
@@ -442,51 +442,72 @@ def architecture(weak_rows: str, params_m: str) -> Diagram:
     d.edges.append(Edge([(g[3] + BW, y3 + BH / 2),
                          (g[3] + BW + 26, y3 + BH / 2)]))
 
-    # N5 contrastive, left; N3/N6 right
+    # Heads sit directly under the graph row so the concept logits reach the
+    # symptom head by a short vertical drop. The symptom head is rightmost,
+    # aligned under the refined-concepts hexagon, because it is fed by the
+    # concept logits and not by the pooled vector.
     y4 = 440
-    c = row(y4, ["Projection head\n$\\pi_i \\in R^{128}$",
+    hx = g[3] + BW + 26
+    pool = d.add(Shape("cube", 38, y4, BW, BH,
+                       "Concept-gated pool\n$g_i \\in R^{768}$", "purple",
+                       fs=8.6))
+    sev = d.add(Shape("cube", 38 + BW + 26, y4, BW, BH,
+                      "Severity 4 / Risk 5\nclass-weighted CE", "purple",
+                      fs=8.6))
+    stress = d.add(Shape("cube", 38 + 2 * (BW + 26), y4, BW, BH,
+                         "Stress head\nsigmoid", "purple", fs=8.6))
+    sym = d.add(Shape("cube", hx, y4, BW, BH,
+                      "Symptom head\n22 logits", "purple", fs=8.6))
+    d.regions.append(Region(38 - 14, y4 - 14, hx + BW - 38 + 28, BH + 28,
+                            "Prediction Heads", "purple"))
+    # refined concepts drop straight into the symptom head
+    d.edges.append(Edge([(hx + BW / 2, y3 + BH), (hx + BW / 2, y4 - 14)],
+                        label="concept logits"))
+    d.edges.append(Edge([(pool.x + BW, y4 + BH / 2), (sev.x, y4 + BH / 2)]))
+    d.edges.append(Edge([(sev.x + BW, y4 + BH / 2), (stress.x, y4 + BH / 2)]))
+
+    # N5 on the left, N6 on the right, both below the heads
+    y5 = 578
+    c = row(y5, ["Projection head\n$\\pi_i \\in R^{128}$",
                  "InfoNCE, $T=0.1$\n$J(y_i,y_j)\\geq 0.5$"],
             "gold", "Symptom-Profile Contrastive (N5)")
-    d.edges.append(Edge([(c[0] + BW, y4 + BH / 2), (c[1], y4 + BH / 2)]))
+    d.edges.append(Edge([(c[0] + BW, y5 + BH / 2), (c[1], y5 + BH / 2)]))
 
-    u = row(y4, [f"Weak stream\n{weak_rows} posts",
-                 "Variance head\n$u_k^{\\top}sg[g_i]$",
+    u = row(y5, ["Variance head\n$u_k^{\\top}sg[g_i]$",
                  "Abstention score"],
-            "teal", "Weak Supervision (N3) and Learned Uncertainty (N6)",
-            x0=c[1] + BW + 70,
-            kinds=["cylinder", "cube", "hexagon"])
-    for i in range(2):
-        d.edges.append(Edge([(u[i] + BW, y4 + BH / 2),
-                             (u[i + 1], y4 + BH / 2)]))
+            "teal", "Learned Uncertainty (N6)",
+            x0=hx - BW - 26, kinds=["cube", "hexagon"])
+    d.edges.append(Edge([(u[0] + BW, y5 + BH / 2), (u[1], y5 + BH / 2)]))
+    # the variance head reads the pooled vector through a stopped gradient
+    d.edges.append(Edge([(pool.x + BW / 2, y4 + BH),
+                         (pool.x + BW / 2, y5 - 32),
+                         (u[0] + BW / 2, y5 - 32),
+                         (u[0] + BW / 2, y5 - 14)],
+                        label="stop-gradient", dashed=True))
+    d.edges.append(Edge([(pool.x + BW / 2, y4 + BH),
+                         (pool.x + BW / 2, y5 - 14)], arrow=False))
 
-    # pooling and heads
-    y5 = 580
-    p = row(y5, ["Concept-gated pool\n$g_i \\in R^{768}$",
-                 "Symptom head\n22 logits",
-                 "Severity 4 / Risk 5\nclass-weighted CE",
-                 "Stress head\nsigmoid"],
-            "purple", "Prediction Heads")
-    for i in range(3):
-        d.edges.append(Edge([(p[i] + BW, y5 + BH / 2),
-                             (p[i + 1], y5 + BH / 2)]))
-    d.edges.append(Edge([(g[3] + BW + 26 + BW / 2, y3 + BH),
-                         (g[3] + BW + 26 + BW / 2, y5 - 14)], dashed=True))
-
-    # objective bar
-    y6 = 712
-    d.add(Shape("bar", 38, y6, 880, 56,
+    # objective bar, with the weak stream feeding its symptom term
+    y6 = 726
+    weak = d.add(Shape("cylinder", hx + 72, y6 - 4, BW, 64,
+                       f"N3  Weak stream\n{weak_rows} posts, 11\n"
+                       f"unlabelled symptoms", "navy", fs=7.8))
+    d.add(Shape("bar", 38, y6, hx - 38 - 26, 56,
                 "Multi-task objective   "
                 "$L = L_{sym} + \\lambda_s L_{sev} + \\lambda_r L_{risk} + "
                 "\\lambda_t L_{str} + \\lambda_c L_{con} + \\lambda_u L_{unc} "
                 "+ \\lambda_g \\|\\Delta A\\|_1$",
-                "slate", bold=False, fs=9.4))
-    d.add(Shape("box", 946, y6, 172, 56,
-                f"Update {params_m} M\nparameters", "slate", fs=9.0,
+                "slate", bold=False, fs=8.6))
+    d.edges.append(Edge([(weak.x, y6 + 28), (hx - 26, y6 + 28)],
+                        label="to $L_{sym}$"))
+    for src in (sym.x + BW / 2, sev.x + BW / 2, stress.x + BW / 2):
+        d.edges.append(Edge([(src, y4 + BH), (src, y6 - 6)], dashed=True))
+    d.edges.append(Edge([(c[1] + BW / 2, y5 + BH), (c[1] + BW / 2, y6 - 6)],
+                        dashed=True))
+    d.add(Shape("box", 38, y6 + 84, 240, 44,
+                f"Update {params_m} M parameters", "slate", fs=9.0,
                 bold=True))
-    d.edges.append(Edge([(918, y6 + 28), (946, y6 + 28)]))
-    for src in (p[1] + BW / 2, p[2] + BW / 2, c[1] + BW / 2, u[1] + BW / 2):
-        d.edges.append(Edge([(src, y5 + BH if src > p[0] else y4 + BH),
-                             (src, y6 - 6)], dashed=True))
+    d.edges.append(Edge([(158, y6 + 56), (158, y6 + 84)]))
     return d
 
 
