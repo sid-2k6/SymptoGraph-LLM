@@ -40,8 +40,9 @@ notebook PNGs, which plot validation and would contradict the tables.
 
 ## Headline findings
 
-- L5 leads 9 of 11 ablation metrics; the ladder is **not** monotone.
-- L5 beats every comparison model on 9 of 11 metrics, losing on
+- Table 9: L5 wins 7 of 9 outright, ties 1, and does not lead
+  on Risk QWK. The ladder is **not** monotone.
+- L5 beats every comparison model on 8 of 10 metrics, losing on
   Risk QWK, Risk MAE.
 - Selective prediction: AURC 0.099 ± 0.015, symptom error
   0.192 at full coverage falling to

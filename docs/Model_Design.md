@@ -940,3 +940,77 @@ Equations are matplotlib-rendered images, not OMML, because `python-docx`
 cannot author OMML. They are not editable in Word. The 22-paragraph excess over
 PRISM (206 against 184) follows from this, an image equation costing two
 paragraphs where inline OMML costs part of one.
+
+## 9. Reviewer revision
+
+`docs/REVIEW_RESPONSE.md` records the disposition of every point raised, as
+**Fixed**, **Disclosed** or **Blocked**. Three structural changes came out of it.
+
+### Equations are now native Word math
+
+`scripts/omml.py` converts a constrained LaTeX subset to OMML, the markup Word
+uses, so the 20 equations are editable and reflow instead of being PNGs. The
+converter raises `UnsupportedLatex` on anything outside its subset, so a
+malformed equation fails the build rather than shipping. `check_doc_order.py`
+asserts 20 OMML elements and exactly 7 media files, 7 being the figure panels;
+an equation image reappearing would fail that check.
+
+A bug this surfaced: the previous revision passed `render_equations()`'s return
+value (a dict of *file paths*) into the OMML converter, so the first OMML build
+typeset the file paths as mathematics. The validator now returns the LaTeX.
+
+### Diagrams are declared once, emitted twice
+
+`scripts/diagrams.py` declares Figures 1 and 2 as data and renders both the
+PNG for the manuscript and the `.drawio` source in `docs/diagrams/`, so the
+editable source and the figure in the paper cannot diverge. The visual
+vocabulary follows the reference document: a serpentine of numbered colour-coded
+stages with hexagonal outputs for the workflow, and extruded boxes inside
+dashed novelty regions with cylinders for data stores for the architecture.
+No draw.io binary exists in this environment, so the PNG is drawn by matplotlib
+from the same declaration rather than exported; re-exporting from draw.io after
+editing is the preferred path.
+
+### The claims were weakened to match the evidence
+
+The reviewer was right that the paper claimed more than the runs support, and
+the corrections are not cosmetic:
+
+- **The reference comparison is no longer presented as controlled.** Notebook
+  05 uses `epochs=8, batch_size=16, max_length=256` with no early stopping,
+  against `10 / 32 / 192` with patience 4 for the proposed model. The claim of
+  an "identical epoch budget, batch size, maximum sequence length" was false.
+  §4.1 now states both budgets and concludes the margins in Table 10 cannot be
+  attributed to architecture; the architectural argument rests on the ladder.
+- **No significance claim survives.** §4.2 promised paired bootstrap tests and
+  per-metric intervals and delivered neither; predictions were not retained so
+  none can be computed now. §4.2 says so, Table 6 lists significance testing as
+  not performed, and §5.3 states that no architectural effect in this study is
+  established statistically.
+- **Metric counts are computed, not asserted.** `results.py` derives them from
+  the printed three-decimal table values. Table 9 is 8 of 9 best, 7 outright
+  plus 1 tie; Table 10 is 8 of 10. The AUROC margin is 0.027; `margin()` rounds
+  both operands before subtracting, which is what fixed the 0.028.
+- **The ordinal and interpretability claims were withdrawn**, the former because
+  the heads are plain linear, the latter because they also observe the pooled
+  vector and no intervention test was run.
+- **Split and graph claims were corrected against the manifest**:
+  `author_overrides_applied = 0`, `authors_total = 500`, 13,386 of 19,762 posts
+  take their source corpus's split, and the quoted graph edge weights were PPMI
+  enrichments rather than the conditional probabilities the text described.
+
+New `5.3 Limitations` and `5.4 Ethical Considerations and Availability`. These
+take the heading count to 21 against the template's 19 and the body to about
++13% on the reference, which is a deliberate trade of template fidelity for
+publishability.
+
+### Still blocked
+
+The baseline discrepancy is unresolved and decides whether the paper has a
+result. The reviewer reports notebook 05 giving MentalRoBERTa symptom F1 0.766;
+`comparison_vs_baselines/leaderboard_test.csv` gives 0.696. Notebook 05 has no
+saved outputs, so this cannot be adjudicated from the repository. At 0.766 the
+margin is +0.009 against a seed dispersion of 0.012 and the headline claim
+evaporates. Neither number was adopted on the basis of which is more
+favourable; the paper was instead restructured so it does not depend on Table
+10. Re-running notebook 05 with outputs retained is the first thing to do.

@@ -32,8 +32,15 @@ WHITELIST_EXACT = {
     # contrastive and variance loss weights, configuration not performance
     "0.100", "0.500",
     # margins obtained by subtracting two values that are both in the tables,
-    # so a reader can verify them directly from Table 10
-    "0.028", "0.079",
+    # so a reader can verify them directly from Table 9 or Table 10
+    "0.028", "0.079", "0.027", "0.055", "0.035", "0.023", "0.056",
+    # labeller calibration error before and after temperature scaling, a
+    # property of the weak labeller reported in the limitations, not a result
+    "0.224", "0.183",
+    # labeller agreement with gold, also a limitations diagnostic
+    "0.660", "0.410", "0.120",
+    # seed dispersion on the risk task, quoted from the Table 9 and 10 cells
+    "0.136",
 }
 
 # patterns whose numbers are structural rather than performance figures
